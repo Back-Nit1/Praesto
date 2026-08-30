@@ -1,0 +1,54 @@
+/**
+ * Storage keys.
+ * ---------------------------------------------------------------------------
+ * Every key the extension writes is declared here, in one place, for reasons
+ * that only become obvious once data is in real users' browsers:
+ *
+ *  - A migration must be able to enumerate what exists. Keys invented ad hoc at
+ *    call sites cannot be migrated because nothing knows they are there.
+ *  - Export/import (Phase 1 requirement) needs the complete key set.
+ *  - A typo'd key at a call site is not a crash; it is a value that writes
+ *    successfully and is never read again. Constants make that a compile error.
+ *
+ * The `aa:` prefix namespaces our data inside a storage area we may one day
+ * share with another module, and makes a manual inspection of
+ * chrome.storage.local legible.
+ */
+
+const PREFIX = 'aa';
+
+export const STORAGE_KEYS = {
+  /**
+   * Version of the whole persisted storage layout - distinct from the profile's
+   * own `schemaVersion`. Storage-level migrations (renaming a key, splitting a
+   * collection) are versioned separately from document-level ones because they
+   * change at different times for different reasons.
+   */
+  storageVersion: `${PREFIX}:storageVersion`,
+
+  /** The active ApplicantProfile document. */
+  activeProfile: `${PREFIX}:profile:active`,
+
+  /** Id of the active profile, so multiple profiles can be supported later. */
+  activeProfileId: `${PREFIX}:profile:activeId`,
+
+  /** User settings: log level, debug mode, autofill thresholds. */
+  settings: `${PREFIX}:settings`,
+
+  /**
+   * Learned field mappings (spec section 19).
+   *
+   * In chrome.storage rather than IndexedDB for now: the working set is small
+   * (hundreds of rules at most), it is read on the hot path during every field
+   * resolution, and chrome.storage reads are markedly cheaper than opening an
+   * IndexedDB transaction in an MV3 service worker that may have just been
+   * woken from eviction. Moving it later is a one-line change because it sits
+   * behind a repository interface.
+   */
+  learnedMappings: `${PREFIX}:learning:mappings`,
+} as const;
+
+export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
+
+/** Current storage layout version. Bump alongside a new migration step. */
+export const STORAGE_VERSION = 1;
