@@ -15,3 +15,10 @@ dist/
 # Phase 1 import/export) and those files contain real PII.
 *.profile.json
 /local/
+
+# Local secrets. Note that a .env only keeps a key out of git - Vite INLINES
+# import.meta.env values into the bundle, and the bundle ships to every user.
+# See SECURITY.md before putting any credential in one.
+.env
+.env.*
+!.env.example

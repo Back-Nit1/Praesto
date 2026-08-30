@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "wxt",
-    "build": "wxt build",
+    "build": "wxt build && npm run scan:secrets",
+    "scan:secrets": "node scripts/check-bundle-secrets.mjs dist",
     "zip": "wxt zip",
     "fixtures": "node scripts/serve-fixtures.mjs",
     "icons": "python3 scripts/generate-icons.py",
