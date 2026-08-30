@@ -117,6 +117,15 @@ type PanelState =
       fieldsDetected: number;
       /** localId -> what actually happened. Absent until a fill has run. */
       outcomes: Record<string, FieldFillReport>;
+      /**
+       * localId -> the frame that owns the element.
+       *
+       * An application form is frequently an EMBEDDED one - a Greenhouse or
+       * Lever iframe inside the employer's own careers page - and the element
+       * map that can resolve a localId lives in the frame that scanned it. A
+       * fill addressed to the top frame would find nothing there.
+       */
+      frameByLocalId: Record<string, number>;
     }
   | { kind: 'error'; message: string; code?: string };
 
@@ -165,13 +174,36 @@ export function App(): ReactNode {
    * re-injection, so a second Scan click re-runs the file and returns
    * immediately rather than installing a duplicate message listener.
    */
-  const sendToActiveTab = useCallback(async <T,>(message: unknown): Promise<T | undefined> => {
+  const injectScanner = useCallback(async (): Promise<
+    { tabId: number; frameIds: number[] } | undefined
+  > => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id === undefined) return undefined;
     const tabId = tab.id;
 
     try {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ['scanner.js'] });
+      /**
+       * EVERY FRAME, not just the top one.
+       *
+       * The most common real application is an embedded one: an employer's
+       * careers page with a Greenhouse or Lever form in an iframe. Scanning
+       * only the top document finds the page furniture and none of the
+       * questions, which reads to the user as "this extension does not work on
+       * the site I actually need it for".
+       *
+       * `activeTab` covers the whole tab including its subframes, so this
+       * needs no additional permission - the user's click is still the grant.
+       * Frames Chrome refuses (about:blank, a cross-origin frame mid-navigation)
+       * simply do not appear in the results.
+       */
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: ['scanner.js'],
+      });
+      const frameIds = injected.map((result) => result.frameId ?? 0);
+      // Deduplicated and ordered with the top frame first, so the panel lists
+      // the main document's fields before an embedded form's.
+      return { tabId, frameIds: [...new Set(frameIds)].sort((a, b) => a - b) };
     } catch (error) {
       // Injection is refused on pages no extension may touch: chrome://, the
       // Web Store, the PDF viewer, and other extensions' pages. Normal, not a
@@ -179,30 +211,37 @@ export function App(): ReactNode {
       log.debugLazy(() => ['Could not inject the scanner into this tab', error]);
       return undefined;
     }
-
-    try {
-      return (await chrome.tabs.sendMessage(tabId, message)) as T;
-    } catch (error) {
-      // The tab navigated between injection and the message, or the page tore
-      // down the listener. Recoverable - the user can scan again.
-      log.debugLazy(() => ['The page did not answer', error]);
-      return undefined;
-    }
   }, []);
+
+  /**
+   * Message one frame.
+   *
+   * Addressed by `frameId` rather than broadcast to the tab: a broadcast
+   * delivers to every frame and only the FIRST reply is ever received, so an
+   * embedded form's answer would be discarded at random.
+   */
+  const sendToFrame = useCallback(
+    async <T,>(tabId: number, frameId: number, message: unknown): Promise<T | undefined> => {
+      try {
+        return (await chrome.tabs.sendMessage(tabId, message, { frameId })) as T;
+      } catch (error) {
+        // The frame navigated between injection and the message, or it never
+        // ran our script. Recoverable, and never a reason to fail the others.
+        log.debugLazy(() => ['A frame did not answer', frameId, error]);
+        return undefined;
+      }
+    },
+    [],
+  );
 
   const handleScan = useCallback(async (): Promise<void> => {
     setBusy(true);
     setStatus({ kind: 'idle' });
     setState({ kind: 'scanning' });
 
-    const response = await sendToActiveTab<ContentScanResponse | ContentErrorResponse>({
-      type: 'CONTENT_SCAN',
-    });
-
-    setBusy(false);
-    setPageChanged(false);
-
-    if (response === undefined) {
+    const injected = await injectScanner();
+    if (injected === undefined) {
+      setBusy(false);
       setState({
         kind: 'error',
         message:
@@ -211,21 +250,66 @@ export function App(): ReactNode {
       return;
     }
 
-    if (!response.ok) {
-      // The code travels all the way from the service worker precisely so this
-      // branch can tell "you have not made a profile yet" apart from "the
-      // extension broke". They need different words and different next steps.
-      setState({ kind: 'error', message: response.message, code: response.code });
+    // Frames are scanned in parallel: they are independent documents, and a
+    // slow embedded form should not hold up the rest of the page.
+    const scans = await Promise.all(
+      injected.frameIds.map(async (frameId) => ({
+        frameId,
+        response: await sendToFrame<ContentScanResponse | ContentErrorResponse>(
+          injected.tabId,
+          frameId,
+          { type: 'CONTENT_SCAN' },
+        ),
+      })),
+    );
+
+    setBusy(false);
+    setPageChanged(false);
+
+    const actions: ResolvedFieldAction[] = [];
+    const frameByLocalId: Record<string, number> = {};
+    let fieldsDetected = 0;
+    const errors: ContentErrorResponse[] = [];
+
+    for (const scan of scans) {
+      if (scan.response === undefined) continue;
+      if (!scan.response.ok) {
+        errors.push(scan.response);
+        continue;
+      }
+      fieldsDetected += scan.response.fieldsDetected;
+      for (const action of scan.response.actions) {
+        actions.push(action);
+        frameByLocalId[action.localId] = scan.frameId;
+      }
+    }
+
+    /**
+     * A failure is only reported when NOTHING worked.
+     *
+     * An ad iframe that answered with an error must not hide a form that
+     * scanned perfectly well in the frame next to it. But when every frame
+     * failed, the reason matters - especially PROFILE_NOT_FOUND, which the
+     * user can act on - so it is preferred over the generic ones.
+     */
+    if (actions.length === 0 && errors.length > 0) {
+      const preferred = errors.find((error) => error.code === 'PROFILE_NOT_FOUND') ?? errors[0];
+      if (preferred !== undefined) {
+        setState({ kind: 'error', message: preferred.message, code: preferred.code });
+        return;
+      }
+    }
+
+    if (scans.every((scan) => scan.response === undefined)) {
+      setState({
+        kind: 'error',
+        message: 'This page did not respond. Reload it and scan again.',
+      });
       return;
     }
 
-    setState({
-      kind: 'scanned',
-      actions: response.actions,
-      fieldsDetected: response.fieldsDetected,
-      outcomes: {},
-    });
-  }, [sendToActiveTab]);
+    setState({ kind: 'scanned', actions, fieldsDetected, outcomes: {}, frameByLocalId });
+  }, [injectScanner, sendToFrame]);
 
   /**
    * Teach the system what a field means.
@@ -240,12 +324,20 @@ export function App(): ReactNode {
     profilePath: string | null,
     scope: MappingScope,
   ): Promise<void> {
-    const response = await sendToActiveTab<{ ok: boolean }>({
-      type: 'CONTENT_CORRECT',
-      localId,
-      profilePath,
-      scope,
-    });
+    const target = await injectScanner();
+    // The descriptor for this field lives in the frame that scanned it, and
+    // nowhere else - so the correction has to be addressed there.
+    const frameId = state.kind === 'scanned' ? (state.frameByLocalId[localId] ?? 0) : 0;
+
+    const response =
+      target === undefined
+        ? undefined
+        : await sendToFrame<{ ok: boolean }>(target.tabId, frameId, {
+            type: 'CONTENT_CORRECT',
+            localId,
+            profilePath,
+            scope,
+          });
 
     if (response?.ok !== true) {
       setStatus({ kind: 'error', message: 'That correction could not be saved.' });
@@ -291,21 +383,55 @@ export function App(): ReactNode {
       });
     }
 
-    const response = await sendToActiveTab<ContentFillResponse | ContentErrorResponse>({
-      type: 'CONTENT_FILL',
-      actions: requested,
-      ...(resume !== undefined ? { resume } : {}),
-    });
+    const target = await injectScanner();
+    if (target === undefined) {
+      setBusy(false);
+      setStatus({ kind: 'error', message: 'This page can no longer be reached. Rescan.' });
+      return;
+    }
+
+    /**
+     * Grouped by the frame that owns each field.
+     *
+     * Only the frame that scanned a field can resolve its localId to an
+     * element, so a fill spanning an employer's page and its embedded
+     * application form is genuinely two operations. They run in parallel and
+     * their outcomes are concatenated - the panel does not care which frame a
+     * field came from, only what happened to it.
+     */
+    const byFrame = new Map<number, ResolvedFieldAction[]>();
+    for (const action of requested) {
+      const frameId =
+        state.kind === 'scanned' ? (state.frameByLocalId[action.localId] ?? 0) : 0;
+      const existing = byFrame.get(frameId);
+      if (existing === undefined) byFrame.set(frameId, [action]);
+      else existing.push(action);
+    }
+
+    const replies = await Promise.all(
+      [...byFrame.entries()].map(([frameId, actions]) =>
+        sendToFrame<ContentFillResponse | ContentErrorResponse>(target.tabId, frameId, {
+          type: 'CONTENT_FILL',
+          actions,
+          ...(resume !== undefined ? { resume } : {}),
+        }),
+      ),
+    );
 
     setBusy(false);
 
-    if (response === undefined || !response.ok) {
+    const outcomes: FieldFillReport[] = [];
+    let failure: ContentErrorResponse | undefined;
+    for (const reply of replies) {
+      if (reply === undefined) continue;
+      if (reply.ok) outcomes.push(...reply.outcomes);
+      else failure = reply;
+    }
+
+    if (outcomes.length === 0) {
       setStatus({
         kind: 'error',
-        message:
-          response === undefined
-            ? 'The page stopped responding. Rescan and try again.'
-            : response.message,
+        message: failure?.message ?? 'The page stopped responding. Rescan and try again.',
       });
       return;
     }
@@ -314,13 +440,13 @@ export function App(): ReactNode {
     // must not erase the record of what that bulk fill did.
     setState((current) => {
       if (current.kind !== 'scanned') return current;
-      const outcomes = { ...current.outcomes };
-      for (const outcome of response.outcomes) outcomes[outcome.localId] = outcome;
-      return { ...current, outcomes };
+      const merged = { ...current.outcomes };
+      for (const outcome of outcomes) merged[outcome.localId] = outcome;
+      return { ...current, outcomes: merged };
     });
 
-    const verified = response.outcomes.filter((outcome) => outcome.verified).length;
-    const failed = response.outcomes.length - verified;
+    const verified = outcomes.filter((outcome) => outcome.verified).length;
+    const failed = outcomes.length - verified;
 
     // The summary states the failures out loud. A count that silently omits
     // them is the same lie as the old "Filled" badge, just smaller.
