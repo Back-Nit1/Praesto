@@ -257,6 +257,92 @@ what the *page* said, never what *you* said.
 
 ---
 
+## Seeing what changed
+
+Every change to this project is a git commit with an explanation. Nothing is
+edited in place without a record, so "what did the resume feature actually
+touch?" is always answerable.
+
+### The short version
+
+```bash
+git log --oneline                  # every change, newest first
+git show --stat <hash>             # which files one change touched
+git show <hash>                    # the full diff, with the reasoning at the top
+git log -p -- src/packages/x.ts    # the history of one file
+git diff                           # what is changed but not yet committed
+```
+
+### Walking through a real example
+
+The resume feature is commit `e7e3242`. To see what it did:
+
+```bash
+git show --stat e7e3242            # 22 files: the parser, the store, the UI
+git show e7e3242 -- src/packages/resume-parser/pdf/extract.ts
+```
+
+The commit message says *why*, the diff says *what*, and the file's own header
+comment says *how it works and what it deliberately does not do*. Those three
+are meant to be read together — if a change is not obvious from the diff, the
+explanation is in one of the other two.
+
+### Finding when something appeared
+
+```bash
+# Which commit introduced resume attachment?
+git log --oneline -- src/packages/fill-engine/adapters/file-upload.ts
+
+# Search commit messages
+git log --oneline --grep resume
+
+# Who last touched each line of a file, and in which commit
+git blame src/packages/form-engine/mapper/resume-field.ts
+```
+
+### Reading it in a UI instead
+
+```bash
+gitk                       # ships with git
+git log --oneline --graph  # a graph in the terminal
+```
+
+VS Code's built-in Source Control panel and its Timeline view (right-click a
+file → *Open Timeline*) show the same history without the command line.
+
+### Conventions
+
+Commit subjects are prefixed by what the change is:
+
+| Prefix | Meaning |
+|---|---|
+| `feat:` | new capability |
+| `fix:` | corrected behaviour — the message names the bug and how it would have shown up |
+| `test:` | tests, and any bug they caught |
+| `docs:` | documentation only |
+| `build:` / `chore:` | tooling and packaging |
+
+Commit bodies explain **why**, not just what. A `fix:` in particular says what
+the wrong behaviour would have looked like to a user, because that is the part
+you cannot recover from the diff later.
+
+### If more than one person (or agent) is working here
+
+Commits can land that you did not make. To see them:
+
+```bash
+git log --oneline -10      # what has landed recently
+git status                 # what is changed in your working tree right now
+git diff HEAD              # everything uncommitted, including staged
+```
+
+`IMPLEMENTATION_STATUS.md` is the running summary of where the project stands —
+what is built, what is not, known limitations, and the next recommended task. It
+is updated with the work, so it is the fastest way to catch up without reading
+the log.
+
+---
+
 ## Working on it
 
 **The regression loop** (from `prompt.md` section 25.3) is not optional — it is
