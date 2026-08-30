@@ -34,6 +34,19 @@ export type AppErrorCode =
   | 'NO_ADAPTER'               // control type we do not know how to drive
   | 'FILL_REJECTED'            // adapter ran but the UI did not accept the value
   | 'VERIFY_FAILED'            // post-fill read-back did not match
+  // --- backend gateway (the model/chat proxy) ------------------------------
+  // Added with packages/backend. These describe failures talking to OUR OWN
+  // backend - never to a model provider directly, which the architecture
+  // forbids (see Security.md, "Why an API key cannot live in the extension").
+  | 'BACKEND_NOT_CONFIGURED'   // no backend origin was compiled in
+  | 'BACKEND_UNREACHABLE'      // DNS, offline, CSP refusal, timeout
+  | 'BACKEND_REJECTED'         // backend answered with a 4xx/5xx
+  | 'BACKEND_UNAUTHENTICATED'  // no device token, or the backend refused it
+  | 'RESPONSE_TOO_LARGE'       // backend sent more than we will read
+  | 'RATE_LIMITED'             // OUR client-side budget refused the call
+  // --- at-rest encryption --------------------------------------------------
+  | 'CRYPTO_UNAVAILABLE'       // WebCrypto missing (non-secure context)
+  | 'DECRYPTION_FAILED'        // wrong passphrase, or the data was tampered with
   // --- catch-all -----------------------------------------------------------
   | 'UNKNOWN';
 

@@ -28,7 +28,7 @@
  * only ever come from an explicit user statement. Demographics are also
  * explicitly optional here, and saying nothing is a first-class answer.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Field, Section, StateBadge, type FieldState } from '@/components/ui';
 import { newId } from '@shared/ids';
 import { formatDate, parseDate, type NormalizedDate } from '@profile/normalizers/date';
@@ -66,7 +66,11 @@ const stateOf = (value: ProfileValue<unknown>): FieldState => valueState(value) 
  * would be more "correct" and considerably more tedious for a forty-item skills
  * list.
  */
-const list = (value: ProfileValue<string[]>): string => (value.value ?? []).join(', ');
+const list = (value: ProfileValue<string[]>): string =>
+  // The raw text the user typed wins over the parsed list, for the same reason
+  // it does for dates and phones: re-rendering the parse while they are still
+  // typing makes the field impossible to type in.
+  value.raw ?? (value.value ?? []).join(', ');
 
 const parseList = (input: string): string[] =>
   input
@@ -388,7 +392,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           state={stateOf(profile.links.portfolio)}
           onChange={(next) => setLink('portfolio', next)}
         />
-        <Field
+        <CommaListField
           label="Other links"
           value={profile.links.other.map((link) => link.value ?? '').join(', ')}
           state={profile.links.other.length > 0 ? 'verified' : 'missing'}
@@ -441,7 +445,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       </Section>
 
       <Section title="Skills">
-        <Field
+        <CommaListField
           label="Skills"
           value={list(profile.skills)}
           state={stateOf(profile.skills)}
@@ -467,7 +471,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           onChange={setAvailableStartDate}
           hint='Anything readable: "June 2026", "2026-06-01", "Immediately".'
         />
-        <Field
+        <CommaListField
           label="Preferred locations"
           value={list(profile.applicationPreferences.preferredLocations)}
           state={stateOf(profile.applicationPreferences.preferredLocations)}
@@ -532,7 +536,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           state={stateOf(profile.demographics.gender)}
           onChange={(next) => setDemographicString('gender', next)}
         />
-        <Field
+        <CommaListField
           label="Race / ethnicity"
           value={list(profile.demographics.raceEthnicity)}
           state={stateOf(profile.demographics.raceEthnicity)}
@@ -744,7 +748,7 @@ function ProjectEntry({
           onChange={(next) => set('url', userValue(next))}
         />
       </div>
-      <Field
+      <CommaListField
         label="Technologies"
         value={list(entry.technologies)}
         state={stateOf(entry.technologies)}
@@ -809,6 +813,56 @@ function DateField({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * A comma-separated list, typed as one line.
+ *
+ * THE BUG THIS EXISTS TO FIX. The stored value is a parsed array, so rendering
+ * it back as `items.join(', ')` on every keystroke deleted the separator the
+ * user had just typed: "react," re-rendered as "react", and a second item
+ * could not be started at all. Four fields on this screen had it.
+ *
+ * The draft is local, and resyncs from storage only when the two genuinely
+ * disagree - an import or a reload - rather than on the echo of our own
+ * keystroke. Comparing the PARSED forms is what makes that distinction: "a,"
+ * and "a" are the same list, so a resync would be pure interference.
+ */
+function CommaListField({
+  label,
+  value,
+  state,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  state: FieldState;
+  onChange: (raw: string) => void;
+  hint?: string;
+}): ReactNode {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    const same = parseList(value).join('\u0000') === parseList(draft).join('\u0000');
+    if (!same) setDraft(value);
+    // `draft` is deliberately not a dependency: this reacts to the STORED value
+    // changing underneath the field, not to the user typing in it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <Field
+      label={label}
+      value={draft}
+      state={state}
+      onChange={(next) => {
+        setDraft(next);
+        onChange(next);
+      }}
+      {...(hint !== undefined ? { hint } : {})}
+    />
   );
 }
 

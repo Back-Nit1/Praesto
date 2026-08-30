@@ -46,6 +46,25 @@ export const STORAGE_KEYS = {
    * behind a repository interface.
    */
   learnedMappings: `${PREFIX}:learning:mappings`,
+
+  /**
+   * Per-install device token for the backend gateway.
+   *
+   * NOT an API key. It identifies THIS INSTALL to our own backend, which holds
+   * the provider key. Compromising it costs one user's quota, not the account -
+   * which is the entire reason the architecture is shaped this way. See
+   * Security.md.
+   */
+  deviceToken: `${PREFIX}:backend:deviceToken`,
+
+  /**
+   * Client-side spend window for model calls.
+   *
+   * Storage-backed rather than in-memory because MV3 evicts the service worker
+   * every ~30s idle and an in-memory counter would reset with it. This is a
+   * courtesy limit; the enforceable one is the backend's.
+   */
+  modelQuota: `${PREFIX}:backend:modelQuota`,
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
