@@ -44,7 +44,15 @@ export default defineConfig({
 
   modules: ['@wxt-dev/module-react'],
 
-  manifest: {
+  /**
+   * The manifest is a FUNCTION of the build environment.
+   *
+   * SECURITY: only so that the CSP can be strict in production and still allow
+   * WXT's hot-reload websocket in development. Everything else is identical
+   * between the two, and the relaxation below is unreachable in a shipped
+   * build - see `connect-src` in `content_security_policy`.
+   */
+  manifest: ({ mode }) => ({
     name: 'Personal Job Application Agent',
     description:
       'Fills job applications from your own verified profile. Leaves anything it is not sure about blank.',
@@ -108,12 +116,56 @@ export default defineConfig({
     // via chrome.sidePanel.setPanelBehavior.
     side_panel: { default_path: 'sidepanel.html' },
 
-    // No remote code, no eval. Explicit CSP so the Web Store reviewer (and any
-    // future contributor) can see the guarantee rather than infer it.
+    /**
+     * CONTENT SECURITY POLICY - see SECURITY.md section 3.
+     *
+     * Was `script-src 'self'; object-src 'self';`. The additions are the ones
+     * that matter for an extension holding a person's identity documents:
+     *
+     *  connect-src   THE EXFILTRATION CONTROL, and the reason this block is
+     *                worth the lines. Today the extension makes no network
+     *                request at all, so `'self'` costs nothing - and it means
+     *                that a bug, a compromised dependency, or an injected
+     *                script CANNOT POST the profile or the resume to an
+     *                attacker's host. The browser refuses the connection.
+     *                When the chat interface lands, add YOUR BACKEND ORIGIN
+     *                here and nothing else. Do not add a model provider's
+     *                origin: calling one directly means the API key is in the
+     *                client, which SECURITY.md section 2 rules out.
+     *
+     *  frame-ancestors 'none'  nothing may embed our pages. Chrome already
+     *                blocks this for non-web-accessible resources, so this is
+     *                belt-and-braces that also survives a future accidental
+     *                `web_accessible_resources` entry.
+     *
+     *  base-uri 'none'   a <base> tag cannot be injected to re-point every
+     *                relative script/stylesheet URL on the page.
+     *
+     *  form-action 'none'  no page of ours can POST anywhere. We have no
+     *                forms that submit; saying so makes it enforced.
+     *
+     * `script-src 'self'` (no `unsafe-eval`, no remote host) is unchanged and
+     * is what keeps PDF.js on its non-eval code path - see
+     * resume-parser/pdf/extract.ts, which now asks for that explicitly rather
+     * than relying on the exception being caught.
+     *
+     * DEV ONLY: WXT's hot reload uses a websocket to localhost, which
+     * `connect-src 'self'` would block, so `npm run dev` would appear to hang.
+     * The relaxation is keyed on `mode` and cannot reach a production build.
+     */
     content_security_policy: {
-      extension_pages: "script-src 'self'; object-src 'self';",
+      extension_pages: [
+        "script-src 'self'",
+        "object-src 'self'",
+        mode === 'production'
+          ? "connect-src 'self'"
+          : "connect-src 'self' ws://localhost:* http://localhost:*",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+      ].join('; '),
     },
-  },
+  }),
 
   vite: () => ({
     plugins: [tailwindcss()],
