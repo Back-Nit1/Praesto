@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-08-30
-**Tests:** 206 passing · **Typecheck:** clean · **Build:** 513 kB (`dist/chrome-mv3`)
+**Tests:** 263 passing · **Typecheck:** clean · **Build:** 976 kB (`dist/chrome-mv3`)
 
 ---
 
@@ -13,7 +13,7 @@ Required by `prompt.md` section 0.13. Updated as work lands.
 |---|---|
 | 0 — Repository foundation | **Done** |
 | 1 — Canonical applicant profile | **Done** |
-| 2 — Resume parsing onboarding | Not started (deliberately deferred — see below) |
+| 2 — Resume parsing onboarding | **Done** |
 | 3 — Generic semantic form engine | **Done**, including the mapping playground |
 | 4 — Generic fill engine | **Mostly done** — adapters, verification, side-panel review and correction all work; audit persistence outstanding |
 | 5 — Learned corrections | **Done** |
@@ -21,10 +21,9 @@ Required by `prompt.md` section 0.13. Updated as work lands.
 | 7 — Workday | Not started |
 | 8 — Question / answer memory | Not started |
 
-Resume parsing is deferred on the spec's own instruction (section 30): *"do not
-let it block testing the core application engine."* A manually entered profile
-already exercises detection → mapping → resolution → filling → review, which is
-the part of the product that has to be right.
+Resume parsing was built last, on the spec's own sequencing instruction
+(section 30): *"do not let it block testing the core application engine."* The
+core engine was proven against a manually entered profile first.
 
 ---
 
@@ -146,7 +145,12 @@ would keep filling the field the user just told it to stop touching.
 Stated plainly, because the product's whole claim is that it does not overstate
 what it knows.
 
-1. **No resume parsing.** The profile is entered by hand or imported as JSON.
+1. **Resume parsing is single-column, text-native PDF only** (spec 8.1). A
+   two-column layout produces interleaved lines; the extractors pick out what
+   they recognise rather than assuming a clean document, so the result is
+   partial rather than wrong. DOCX and OCR are not implemented — a scanned PDF
+   is detected and reported as such, and the file is still stored for
+   attachment.
 2. **Corrections apply to scalar profile fields only.** The side panel's picker
    lists the ~30 scalar paths. Correcting a field to a specific education or
    employment entry (`education[0].gpa`) needs an entry picker the UI does not

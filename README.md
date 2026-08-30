@@ -23,7 +23,7 @@ will stop and ask when it genuinely does not know.
 npm install
 npm run build      # -> dist/chrome-mv3   (load this folder in Chrome)
 npm run dev        # dev build with hot reload
-npm test           # 206 tests
+npm test           # 263 tests
 npm run compile    # typecheck
 npm run fixtures   # serve the practice forms at http://localhost:5174
 ```
@@ -41,8 +41,12 @@ npm run fixtures   # serve the practice forms at http://localhost:5174
    ```
    In the file picker you can hit <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> and paste
    that path.
-5. Pin the extension, click its icon, then **Edit your profile** and fill in
-   your details. **Save changes.**
+5. Pin the extension, click its icon, then **Edit your profile**.
+6. Go to the **Resume** tab and upload your PDF. It reads your name, email,
+   phone, location, links, education, experience and skills, shows you each
+   value next to the line it came from, and adds only what you accept.
+7. Check the **Profile** tab, fix anything that was read wrong, and answer the
+   work-authorization questions — those are never inferred from a resume.
 
 ### Try it
 
@@ -81,6 +85,10 @@ submits an application.
 - **Learns from your corrections.** Fix a field once and it maps that question
   correctly on every future application — even where the HTML is completely
   different
+- **Imports your resume** to bootstrap the profile, showing every extracted
+  value next to the source line so you can check it before accepting
+- **Attaches your resume** to the upload field automatically, so you never open
+  a file picker again
 
 See [`IMPLEMENTATION_STATUS.md`](./IMPLEMENTATION_STATUS.md) for what is built,
 what is not, and what is next.
@@ -166,6 +174,36 @@ comment asking people to remember.
 
 ---
 
+## Your resume
+
+Upload it once under **Edit your profile → Resume**. Two things then happen:
+
+1. **It bootstraps your profile.** Text is extracted with layout preserved, so a
+   date at the right of a job title is read as that job's date and a bullet is
+   attached to the entry above it. Contact details are read from the **header
+   block only** — a resume routinely contains a reference's email or a previous
+   employer's city, and searching the whole document would find those about as
+   often as yours. Nothing reaches your profile until you accept it on the
+   review screen, and a verified value is never overwritten.
+
+2. **It gets attached to applications.** The stored PDF is handed to the form's
+   resume upload field, with the `change` event the form needs in order to
+   notice. The matcher is deliberately narrow: a form usually has several file
+   inputs, and attaching a resume to the cover-letter field sends an application
+   you would never know was wrong. Cover letter, transcript, portfolio, writing
+   sample and photo fields are all explicitly refused, and an unlabelled file
+   input is left alone.
+
+**Where the file goes: nowhere.** It is stored in this browser's IndexedDB on
+this machine. There is no server in this project, so there is nothing for it to
+be uploaded to. It is read back only to attach it to a form you are filling.
+
+A scanned or image-only PDF has no text to read. The extension says so plainly
+and still stores the file for attachment, rather than presenting an empty
+extraction as a result.
+
+---
+
 ## Privacy
 
 - **Everything stays on your computer.** `chrome.storage.local`, not
@@ -200,13 +238,14 @@ src/
     ├── shared/              Result, errors, ids, logging, messages, runtime budget
     ├── storage/             KeyValueStore, IndexedDB, migrations
     ├── profile/             schema, normalizers, paths, selectors, repository
+    ├── resume-parser/       PDF extraction, layout reconstruction, extractors
     ├── form-engine/         detector, descriptor, fingerprints, mapper, resolver, confidence
     ├── fill-engine/         control adapters, native setter, executor
     ├── ats/                 ATS detection and adapter contracts
     └── learning/            learned mappings from your corrections
 
 fixtures/forms/              HTML the tests run the real pipeline against
-tests/                       206 tests, mostly browser-free
+tests/                       263 tests, mostly browser-free
 ```
 
 **Why the mapper never touches the DOM.** The content script converts elements
