@@ -28,6 +28,8 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { toAppError } from '@shared/errors';
 import { createLogger, setLogLevel } from '@shared/logging';
+// SECURITY: message-boundary rate limiting - see shared/rate-limit.ts.
+import { TokenBucket } from '@shared/rate-limit';
 import {
   errorResponse,
   MESSAGE_PROTOCOL_VERSION,
@@ -40,9 +42,10 @@ import { ChromeLocalStore } from '@storage/key-value-store';
 import { runMigrations } from '@storage/migrations';
 import { StoredProfileRepository } from '@profile/repository';
 import { isProfilePath, labelForPath } from '@profile/paths';
+import { currentEmploymentIndex, mostRecentEducationIndex } from '@profile/selectors';
 import { LearnedMappingStore, type LearnedMappingIndex } from '@learning/mapping-memory';
 import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
-import { mapField } from '@form-engine/mapper/mapper';
+import { mapField, type CollectionEntryIndexes } from '@form-engine/mapper/mapper';
 import { isResumeField } from '@form-engine/mapper/resume-field';
 import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
@@ -121,13 +124,70 @@ export default defineBackground(() => {
   // ---------------------------------------------------------------------------
 
   /**
+   * SECURITY: inbound message budget, per sender.
+   *
+   * A content script runs inside a page we do not control. If a page ever gets
+   * to drive it, the cheapest attack is not stealing data - it is a flood of
+   * RESOLVE_APPLICATION_FIELDS, each one loading the profile and running the
+   * mapping pipeline over up to 500 descriptors. That burns CPU and battery and
+   * pins the service worker awake indefinitely.
+   *
+   * 40 messages of burst covers the largest legitimate exchange by a wide
+   * margin (one scan is ONE message, not one per field). The sustained rate is
+   * set from the noisiest legitimate sender: the scanner's MutationObserver
+   * broadcast, debounced to at most one per `mutationDebounceMs` (200ms on a
+   * fast machine, so 5/second). 10/second leaves that a factor of two of
+   * headroom and is still far below what a flood would need. Keyed by tab
+   * where there is one, so a hostile page cannot exhaust the budget of a
+   * different tab or of the side panel; extension pages share one key.
+   *
+   * Cost is one Map lookup and an integer compare per message - see
+   * shared/rate-limit.ts for why this is a bucket rather than a request log.
+   */
+  const messageBudget = new TokenBucket({
+    capacity: 40,
+    refillPerSecond: 10,
+    // One entry per tab that has ever messaged us, bounded so a page cycling
+    // through tabs cannot grow the map. LRU eviction only ever hands an idle
+    // sender a fresh (full) bucket.
+    maxKeys: 64,
+  });
+
+  /**
    * Single entry point for every inbound message.
    *
    * `return true` keeps the message channel open for an async reply - omitting it
    * is the most common MV3 bug, and it manifests as the sender's callback never
    * firing rather than as an error.
    */
-  chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((raw: unknown, sender, sendResponse) => {
+    /**
+     * SECURITY: SENDER CHECK, BEFORE PARSING.
+     *
+     * `chrome.runtime.onMessage` in MV3 does not receive messages from web
+     * pages (those would arrive on `onMessageExternal`, which we never
+     * register). But this listener is one `externally_connectable` entry - or
+     * one future contributor adding one - away from being reachable by any
+     * site, and the cost of being certain is a string compare. A message
+     * without our own extension id is dropped without being parsed, so a
+     * malformed payload from an unknown sender never even reaches Zod.
+     */
+    if (sender.id !== chrome.runtime.id) {
+      log.warn('Dropped a message from an unexpected sender');
+      sendResponse(errorResponse('SENDER_REJECTED', 'Unrecognised sender'));
+      return false;
+    }
+
+    // Per-tab budget. `sender.tab` is absent for extension pages (side panel,
+    // options), which get their own shared bucket.
+    const budgetKey = sender.tab?.id === undefined ? 'extension' : `tab:${sender.tab.id}`;
+    const decision = messageBudget.take(budgetKey);
+    if (!decision.allowed) {
+      log.warn(`Rate limited ${budgetKey}; retry in ${decision.retryAfterMs}ms`);
+      sendResponse(errorResponse('RATE_LIMITED', 'Too many requests - try again in a moment'));
+      return false;
+    }
+
     handleMessage(raw)
       .then(sendResponse)
       .catch((error: unknown) => {
@@ -269,6 +329,27 @@ export default defineBackground(() => {
     // storage read happens.
     const learned = await learnedMappings.index();
 
+    /**
+     * Which entry a bare "School" or "Employer" question means.
+     *
+     * Computed here rather than in the mapper because it is a question about
+     * the PROFILE - most recent graduation, currently-held job - and keeping
+     * the mapper free of profile access is what makes the whole mapping
+     * cascade testable from plain objects.
+     *
+     * The selectors are explicitly heuristics (see their doc comments), so the
+     * result is fed through the normal confidence policy like everything else:
+     * an unqualified "School" on a form is a suggestion the user can accept,
+     * not a silent assertion about which of their three degrees was meant.
+     */
+    const entryIndexes: CollectionEntryIndexes = {
+      education: mostRecentEducationIndex(profile) ?? 0,
+      employment: currentEmploymentIndex(profile) ?? 0,
+      // Projects have no "most relevant" ordering we can defend, so the first
+      // one wins - which is the order the user themselves put them in.
+      projects: 0,
+    };
+
     const actions: ResolvedFieldAction[] = [];
     let readyToFill = 0;
     let needsReview = 0;
@@ -278,7 +359,7 @@ export default defineBackground(() => {
       // A failure on one field must never abort the batch. A single unusual
       // control should cost that control, not the other nineteen on the page.
       try {
-        actions.push(resolveOneField(profile, descriptor as FieldDescriptor, learned));
+        actions.push(resolveOneField(profile, descriptor as FieldDescriptor, learned, entryIndexes));
       } catch (error) {
         log.warn('Field resolution failed', descriptor.localId, toAppError(error).message);
         actions.push({
@@ -311,6 +392,7 @@ export default defineBackground(() => {
     profile: Parameters<typeof resolveValue>[0],
     descriptor: FieldDescriptor,
     learned: LearnedMappingIndex,
+    entryIndexes: CollectionEntryIndexes,
   ): ResolvedFieldAction {
     // 0. A resume upload is not a profile value, so it is decided before the
     //    mapping cascade runs. It has no canonical path and a different
@@ -330,7 +412,7 @@ export default defineBackground(() => {
 
     // 1. What is this field asking for? Past corrections are consulted here,
     //    and a user-confirmed one outranks every heuristic in the cascade.
-    const mapping = mapField(descriptor, { learned });
+    const mapping = mapField(descriptor, { learned, entryIndexes });
 
     if (mapping.profilePath === null) {
       return {
