@@ -19,10 +19,538 @@
   --color-state-missing: oklch(0.6 0.01 260);
 }
 
-/* The extension's own surfaces follow the user's OS theme. A side panel that
-   is blinding white next to a dark browser is a real usability complaint. */
+/* -------------------------------------------------------------------------
+   Product foundation
+
+   The extension used to inherit Tailwind's neutral defaults almost verbatim.
+   That made both surfaces look like debug tooling: flat black/white canvases,
+   thin borders and controls with no hierarchy. These tokens establish one
+   visual voice without adding a font download or a single remote asset.
+   ------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  --app-bg: #f4f3fb;
+  --app-bg-raised: rgba(255, 255, 255, 0.82);
+  --app-panel: #ffffff;
+  --app-panel-soft: #f8f7fc;
+  --app-text: #19182a;
+  --app-muted: #716f82;
+  --app-faint: #9895a7;
+  --app-border: rgba(46, 42, 75, 0.11);
+  --app-border-strong: rgba(71, 61, 131, 0.2);
+  --app-accent: #6558e8;
+  --app-accent-strong: #4f42d3;
+  --app-accent-soft: #eeebff;
+  --app-teal: #20a58e;
+  --app-success: #18866f;
+  --app-warning: #b56b18;
+  --app-danger: #c64852;
+  --app-shadow: 0 18px 50px rgba(43, 35, 86, 0.08);
+  --app-shadow-soft: 0 7px 24px rgba(43, 35, 86, 0.06);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
+    --app-bg: #111117;
+    --app-bg-raised: rgba(28, 27, 38, 0.84);
+    --app-panel: #1b1a23;
+    --app-panel-soft: #211f2a;
+    --app-text: #f5f3ff;
+    --app-muted: #a7a3b6;
+    --app-faint: #777384;
+    --app-border: rgba(222, 216, 255, 0.09);
+    --app-border-strong: rgba(172, 160, 255, 0.22);
+    --app-accent: #8d80ff;
+    --app-accent-strong: #aa9fff;
+    --app-accent-soft: rgba(118, 99, 255, 0.14);
+    --app-teal: #51d5bc;
+    --app-success: #65d4b8;
+    --app-warning: #f0b865;
+    --app-danger: #ff7f88;
+    --app-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+    --app-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.2);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+label[for],
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--app-accent) 28%, transparent);
+}
+
+/* A small, ownable mark: two application cards moving through a verified
+   checkpoint. It is CSS rather than an image so it stays sharp at 16–48 px. */
+.brand-mark {
+  position: relative;
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 78% 18%, rgba(82, 224, 194, 0.92), transparent 28%),
+    linear-gradient(145deg, #7769ff 0%, #4d3ac6 68%, #322473 100%);
+  box-shadow: 0 9px 26px rgba(83, 65, 211, 0.28);
+}
+
+.brand-mark::before,
+.brand-mark::after {
+  position: absolute;
+  width: 13px;
+  height: 17px;
+  content: "";
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
+  border-radius: 3px;
+  transform: rotate(-8deg) translate(-3px, 1px);
+}
+
+.brand-mark::after {
+  opacity: 0.52;
+  transform: rotate(8deg) translate(4px, -2px);
+}
+
+.brand-mark--small {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+.brand-mark--small::before,
+.brand-mark--small::after {
+  width: 11px;
+  height: 14px;
+}
+
+/* Options workspace ------------------------------------------------------- */
+.options-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 87% -8%, rgba(118, 98, 255, 0.16), transparent 32rem),
+    radial-gradient(circle at 12% 88%, rgba(40, 184, 157, 0.1), transparent 34rem),
+    var(--app-bg);
+}
+
+.options-shell::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.2;
+  background-image: radial-gradient(var(--app-border-strong) 0.65px, transparent 0.65px);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(to bottom, black, transparent 75%);
+}
+
+.options-layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.options-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  padding: 28px 20px 22px;
+  border-right: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-bg-raised) 88%, transparent);
+  backdrop-filter: blur(22px);
+}
+
+.options-main {
+  min-width: 0;
+  padding: 34px clamp(28px, 4vw, 68px) 80px;
+}
+
+.options-workspace {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.workspace-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.workspace-kicker {
+  margin-bottom: 8px;
+  color: var(--app-accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.workspace-title {
+  margin: 0;
+  font-family: "Avenir Next", Inter, ui-sans-serif, sans-serif;
+  font-size: clamp(28px, 3vw, 40px);
+  font-weight: 680;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.workspace-subtitle {
+  max-width: 630px;
+  margin: 10px 0 0;
+  color: var(--app-muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.workspace-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 18px;
+  max-width: none;
+}
+
+.profile-grid > section:nth-child(4),
+.profile-grid > section:nth-child(5),
+.profile-grid > section:nth-child(6),
+.profile-grid > section:nth-child(8),
+.profile-grid > section:nth-child(9),
+.profile-grid > section:nth-child(10) {
+  grid-column: 1 / -1;
+}
+
+.surface-card {
+  border: 1px solid var(--app-border);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--app-panel) 94%, transparent);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.profile-section {
+  position: relative;
+  margin: 0;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.profile-section::after {
+  position: absolute;
+  top: -48px;
+  right: -50px;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  content: "";
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 8%, transparent), transparent 70%);
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 17px;
+}
+
+.section-sigil {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, transparent);
+  border-radius: 9px;
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.section-title {
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+/* Side panel -------------------------------------------------------------- */
+.panel-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 18px 16px 28px;
+  background:
+    radial-gradient(circle at 115% -5%, rgba(120, 100, 255, 0.22), transparent 18rem),
+    radial-gradient(circle at -15% 85%, rgba(43, 201, 170, 0.1), transparent 20rem),
+    var(--app-bg);
+  color: var(--app-text);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.panel-product-name {
+  font-size: 13px;
+  font-weight: 760;
+  letter-spacing: -0.015em;
+}
+
+.panel-host {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--app-muted);
+  font-size: 10px;
+}
+
+.panel-host::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  content: "";
+  border-radius: 999px;
+  background: var(--app-teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-teal) 12%, transparent);
+}
+
+.panel-icon-button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--app-border);
+  border-radius: 11px;
+  background: var(--app-bg-raised);
+  color: var(--app-muted);
+  transition: 150ms ease;
+}
+
+.panel-icon-button:hover {
+  border-color: var(--app-border-strong);
+  color: var(--app-text);
+  transform: translateY(-1px);
+}
+
+.panel-hero {
+  position: relative;
+  padding: 24px 20px 20px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--app-panel) 96%, transparent), color-mix(in srgb, var(--app-accent-soft) 55%, var(--app-panel)));
+  box-shadow: var(--app-shadow);
+}
+
+.panel-hero::after {
+  position: absolute;
+  top: -36px;
+  right: -36px;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  content: "";
+  border: 1px solid color-mix(in srgb, var(--app-accent) 15%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 18px color-mix(in srgb, var(--app-accent) 4%, transparent),
+    0 0 0 38px color-mix(in srgb, var(--app-accent) 3%, transparent);
+}
+
+.panel-hero-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 22%, transparent);
+  border-radius: 14px;
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.panel-card {
+  border: 1px solid var(--app-border);
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--app-panel) 94%, transparent);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric-card {
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-panel) 90%, transparent);
+}
+
+.metric-value {
+  display: block;
+  margin-top: 5px;
+  color: var(--app-text);
+  font-size: 22px;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.metric-label {
+  color: var(--app-muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.action-card {
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-panel-soft) 92%, transparent);
+}
+
+.soft-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--app-border-strong), transparent);
+}
+
+.scan-orbit {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  margin: 22px auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, transparent);
+  border-radius: 999px;
+}
+
+.scan-orbit::before {
+  position: absolute;
+  inset: 7px;
+  content: "";
+  border: 2px solid transparent;
+  border-top-color: var(--app-accent);
+  border-right-color: color-mix(in srgb, var(--app-teal) 72%, transparent);
+  border-radius: inherit;
+  animation: orbit 1.2s linear infinite;
+}
+
+.scan-orbit::after {
+  width: 18px;
+  height: 22px;
+  content: "";
+  border: 1.5px solid var(--app-muted);
+  border-radius: 4px;
+}
+
+@keyframes orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .options-layout {
+    display: block;
+  }
+
+  .options-sidebar {
+    position: relative;
+    height: auto;
+    padding: 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--app-border);
+  }
+
+  .options-main {
+    padding: 28px 18px 60px;
+  }
+
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-grid > section {
+    grid-column: auto !important;
+  }
+
+  .workspace-topbar {
+    display: block;
+  }
+
+  .workspace-actions {
+    justify-content: flex-start;
+    margin-top: 18px;
   }
 }

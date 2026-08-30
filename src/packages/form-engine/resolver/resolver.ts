@@ -65,6 +65,16 @@ export interface ResolvedValue {
 export type ResolutionFailure =
   /** The path resolves to no stored value. Ask the user to fill their profile. */
   | 'no_value'
+  /**
+   * The path is well formed but the collection has no such entry - a question
+   * about a second school from a profile listing one.
+   *
+   * Distinct from `no_value` because the two need different sentences: one
+   * means "fill in this field", the other means "you have not added any
+   * schools yet". Collapsing them produced the unusable "your profile has no
+   * education 1 - institution".
+   */
+  | 'no_entry'
   /** We have the value but cannot render it for this control. */
   | 'no_representation'
   /** An option-based control offered nothing that matches our value. */
@@ -90,7 +100,7 @@ export function resolveValue(
 ): ResolutionResult {
   const lookup = getValueAtPath(profile, path);
   if (lookup.status === 'unknown_path') return fail('unknown_path');
-  if (lookup.status === 'out_of_range') return fail('no_value');
+  if (lookup.status === 'out_of_range') return fail('no_entry');
 
   const stored = lookup.value;
   if (stored.value === null) return fail('no_value');

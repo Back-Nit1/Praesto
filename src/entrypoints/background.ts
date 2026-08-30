@@ -41,7 +41,7 @@ import {
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { runMigrations } from '@storage/migrations';
 import { StoredProfileRepository } from '@profile/repository';
-import { isProfilePath, labelForPath } from '@profile/paths';
+import { isProfilePath, labelForPath, parseCollectionPath } from '@profile/paths';
 import { currentEmploymentIndex, mostRecentEducationIndex } from '@profile/selectors';
 import { LearnedMappingStore, type LearnedMappingIndex } from '@learning/mapping-memory';
 import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
@@ -444,9 +444,11 @@ export default defineBackground(() => {
         ...base,
         action: 'skip',
         explanation:
-          resolution.reason === 'no_value'
-            ? `Your profile has no ${labelForPath(mapping.profilePath).toLowerCase()}`
-            : 'No value could be formatted for this control',
+          resolution.reason === 'no_entry'
+            ? missingEntryExplanation(mapping.profilePath)
+            : resolution.reason === 'no_value'
+              ? `Your profile has no ${labelForPath(mapping.profilePath).toLowerCase()}`
+              : 'No value could be formatted for this control',
       };
     }
 
@@ -474,6 +476,28 @@ export default defineBackground(() => {
       ...(optionValue !== undefined ? { optionValue } : {}),
       explanation: `${labelForPath(mapping.profilePath)} (${mapping.reasons[0]?.signal ?? 'mapped'})`,
     };
+  }
+
+  /**
+   * "We understood the question, and you have not added anything it could
+   * be answered from."
+   *
+   * Specifically: the COLLECTION has no such entry. `labelForPath` renders
+   * these paths as "Education 1 - institution", which read back as "Your
+   * profile has no education 1 - institution" - technically true and useless
+   * as an instruction. What the user needs to know is that the section is
+   * empty and where to fix it.
+   */
+  function missingEntryExplanation(path: string): string {
+    const parsed = parseCollectionPath(path);
+    if (parsed === null) return 'Your profile has nothing to put here';
+    const noun =
+      parsed.collection === 'education'
+        ? 'schools'
+        : parsed.collection === 'employment'
+          ? 'jobs'
+          : 'projects';
+    return `Add your ${noun} in your profile to fill this`;
   }
 
   /** Human-readable reason a mapped field was still left alone. */
