@@ -109,7 +109,12 @@ async function fillOne(
 
   const context: ControlContext = {
     element,
-    kind: action.knowledgeState,
+    // The CONTROL kind ("combobox", "select", "file"), not the knowledge state.
+    // This used to pass `action.knowledgeState` - "known" / "probable" - which
+    // is a statement about our confidence and told the adapters nothing about
+    // the control they were being asked to drive. Any adapter that branched on
+    // it silently never matched.
+    kind: action.controlKind ?? '',
     ...(action.optionValue !== undefined ? { optionValue: action.optionValue } : {}),
   };
 

@@ -406,6 +406,7 @@ export default defineBackground(() => {
         profilePath: null,
         mappingConfidence: 0.95,
         knowledgeState: 'known',
+        controlKind: descriptor.kind,
         explanation: alreadyAttached ? 'A file is already attached' : 'Resume upload',
       };
     }
@@ -433,6 +434,9 @@ export default defineBackground(() => {
       profilePath: mapping.profilePath,
       mappingConfidence: mapping.confidence,
       knowledgeState: mapping.knowledgeState,
+      // Echoed back so the fill engine can choose an adapter by what the
+      // control is. The page told us; it should not have to work it out again.
+      controlKind: descriptor.kind,
     };
 
     if (!resolution.ok) {

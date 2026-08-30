@@ -23,6 +23,7 @@ import {
   readControlValue,
   setNativeValue,
 } from '../native/set-value';
+import { CustomComboboxAdapter } from './combobox';
 import { FileUploadAdapter } from './file-upload';
 import type { ControlAdapter, FillFailureReason, FillResult } from '../types';
 
@@ -238,6 +239,12 @@ export const NATIVE_ADAPTERS: readonly ControlAdapter[] = [
   NativeCheckboxAdapter,
   NativeRadioAdapter,
   NativeSelectAdapter,
+  // Before the text adapter, and after the native select. A custom dropdown is
+  // frequently a text input with `role="combobox"`, which the text adapter
+  // would happily claim and then "fill" by writing into a box the widget
+  // discards on blur. A real <select> never reaches here - the combobox
+  // adapter declines it, because a <select> cannot be opened by script.
+  CustomComboboxAdapter,
   NativeTextAdapter,
 ];
 

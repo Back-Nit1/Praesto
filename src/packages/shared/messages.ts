@@ -282,6 +282,17 @@ export const resolvedFieldActionSchema = z.object({
   value: z.union([z.string(), z.boolean()]).optional(),
   /** For option controls, the option value the adapter should select. */
   optionValue: z.string().optional(),
+  /**
+   * The control kind from the descriptor.
+   *
+   * Sent back so the fill engine can pick an adapter by what the control IS,
+   * not only by what its DOM element looks like. A Workday dropdown is a
+   * `<div role="combobox">`, and a `<div>` alone tells an adapter nothing.
+   *
+   * Optional so an older content script - one still running in an open tab
+   * after an update - keeps working: adapters fall back to element inspection.
+   */
+  controlKind: controlKindSchema.optional(),
   profilePath: z.string().nullable(),
   mappingConfidence: z.number().min(0).max(1),
   knowledgeState: z.enum(['known', 'derived', 'previously_seen', 'probable', 'unknown']),

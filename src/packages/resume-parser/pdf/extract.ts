@@ -56,26 +56,57 @@ export async function extractPdf(data: ArrayBuffer): Promise<Result<ExtractionRe
   const budget = getRuntimeBudget();
 
   try {
-    // Dynamic import - see the module header. The `.mjs` build is the modern
-    // ESM entry point and is what Vite can tree-shake and code-split.
-    const pdfjs = await import('pdfjs-dist');
+    /**
+     * Load PDF.js and its worker module together.
+     *
+     * BOTH IMPORTS ARE DYNAMIC - see the module header. Together they are ~1 MB
+     * of parsed JavaScript, fetched only when the user actually uploads a
+     * resume. The service worker and the content script never pay for it.
+     *
+     * WHY THE `legacy` BUILD
+     * pdfjs-dist v6's default build uses APIs that only very recent runtimes
+     * have - `Promise.try` (Chrome 128+) and `Uint8Array.prototype.toHex`
+     * (Chrome 133+). Using it would mean the extension silently fails to read
+     * resumes on any older Chrome, with no way for the user to tell why. The
+     * `legacy` build is transpiled and self-contained, which costs a little
+     * size and buys a far lower browser floor - the right trade for an
+     * extension meant to be installable by anyone. It is also the reason this
+     * path is testable in Node at all.
+     */
+    const [pdfjs, pdfWorker] = await Promise.all([
+      import('pdfjs-dist/legacy/build/pdf.mjs'),
+      import('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+    ]);
 
     /**
-     * Run PDF.js on the main thread rather than in a worker.
+     * Run PDF.js on the main thread, by handing it the worker module directly.
      *
-     * A worker is faster for rendering large documents, but it needs a
-     * separately-hosted worker script, which under the extension's
-     * `script-src 'self'` CSP means bundling and shipping a second megabyte
-     * artefact. We are extracting text from a one- or two-page resume, once,
-     * on an explicit user action - so the parallelism buys nothing we can
-     * perceive, and the simplicity is worth more than the milliseconds.
+     * PDF.js resolves its worker in this order: it uses
+     * `globalThis.pdfjsWorker.WorkerMessageHandler` if present, and otherwise
+     * dynamically imports whatever URL `GlobalWorkerOptions.workerSrc` names.
+     * Assigning the already-imported module to `globalThis.pdfjsWorker` takes
+     * the first branch, so nothing is ever fetched by URL at runtime. That
+     * matters under the extension's `script-src 'self'` CSP, and it keeps the
+     * worker inside the normal bundle graph instead of needing a separately
+     * emitted asset.
+     *
+     * A real Worker would be faster for rendering large documents. We extract
+     * text from a one- or two-page resume, once, on an explicit user action, so
+     * the parallelism buys nothing perceptible and the simplicity is worth more.
+     *
+     * NOTE FOR ANYONE TEMPTED TO SIMPLIFY THIS: setting `workerSrc = ''` does
+     * NOT mean "no worker". It means "load the worker from the empty URL", and
+     * PDF.js rejects with `Setting up fake worker failed: "No
+     * GlobalWorkerOptions.workerSrc specified."` - which surfaced to users as
+     * "This PDF could not be read".
      */
-    pdfjs.GlobalWorkerOptions.workerSrc = '';
+    (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker = pdfWorker;
 
     const document = await pdfjs.getDocument({
       data: new Uint8Array(data),
       // A resume needs no external resources. Disabling these removes both a
-      // network dependency and a class of malformed-font failures.
+      // network dependency and a class of malformed-font failures. Text
+      // extraction does not need font programs - only glyph positions.
       disableFontFace: true,
       useSystemFonts: false,
     }).promise;
