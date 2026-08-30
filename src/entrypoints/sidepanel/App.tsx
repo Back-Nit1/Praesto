@@ -47,6 +47,13 @@ import {
 } from '@shared/page-protocol';
 import { createLogger } from '@shared/logging';
 import {
+  classifyPage,
+  hasAccess,
+  isPermissionError,
+  requestAccess,
+  type PageAccess,
+} from './page-access';
+import {
   EDUCATION_FIELDS,
   EMPLOYMENT_FIELDS,
   PROJECT_FIELDS,
@@ -136,6 +143,24 @@ const log = createLogger('sidepanel');
  * localId - so a run that filled eleven of thirteen fields can say exactly
  * that. A single boolean could only ever say "we tried".
  */
+/**
+ * The outcome of trying to get the scanner into the page.
+ *
+ * A discriminated result, not `undefined`. The previous version returned
+ * `undefined` for every failure, so the caller could only guess at a cause -
+ * and it guessed "Chrome blocks this page", which was wrong for the most common
+ * failure and left the user with nothing to do about it.
+ */
+type InjectionResult =
+  | { ok: true; tabId: number; frameIds: number[] }
+  | { ok: false; reason: 'restricted'; detail: string }
+  | { ok: false; reason: 'local_file' }
+  | { ok: false; reason: 'needs_permission'; origin: string }
+  | { ok: false; reason: 'no_tab' }
+  | { ok: false; reason: 'failed'; detail: string };
+
+type InjectionFailure = Extract<InjectionResult, { ok: false }>;
+
 type PanelState =
   | { kind: 'idle' }
   | { kind: 'scanning' }
@@ -156,7 +181,7 @@ type PanelState =
        */
       frameByLocalId: Record<string, number>;
     }
-  | { kind: 'error'; message: string; code?: string };
+  | { kind: 'error'; message: string; code?: string | undefined; origin?: string | undefined };
 
 export function App(): ReactNode {
   const [state, setState] = useState<PanelState>({ kind: 'idle' });
@@ -212,45 +237,31 @@ export function App(): ReactNode {
    * re-injection, so a second Scan click re-runs the file and returns
    * immediately rather than installing a duplicate message listener.
    */
-  const injectScanner = useCallback(async (): Promise<
-    { tabId: number; frameIds: number[] } | undefined
-  > => {
+  const injectScanner = useCallback(async (): Promise<InjectionResult> => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id === undefined) return undefined;
+    if (tab?.id === undefined) return { ok: false, reason: 'no_tab' };
     const tabId = tab.id;
 
-    /**
-     * SECURITY: refuse a target that is not an ordinary web page.
-     *
-     * `chrome.scripting.executeScript` would fail on these anyway, but failing
-     * with a clear reason here is worth the four lines: the panel can say
-     * "this page cannot be scanned" instead of surfacing an opaque injection
-     * error, and it documents the intent - this extension carries a person's
-     * identity documents into whatever page is in front of it, so the set of
-     * pages it will talk to is stated rather than left to Chrome's defaults.
-     *
-     * `tab.url` is readable here because the user's action granted activeTab.
-     * A missing url means Chrome withheld it, which is itself a refusal.
-     */
-    if (!isScannableUrl(tab.url)) {
-      log.debugLazy(() => ['Refusing to inject into a non-web page']);
-      return undefined;
+    // Classify BEFORE attempting anything. A chrome:// page is not a failure to
+    // diagnose after the fact - it is a page we can say something accurate
+    // about without touching it.
+    const access: PageAccess = classifyPage(tab.url);
+    if (access.kind === 'restricted') {
+      return { ok: false, reason: 'restricted', detail: access.reason };
+    }
+    if (access.kind === 'local_file') return { ok: false, reason: 'local_file' };
+    if (access.kind === 'unknown') {
+      return { ok: false, reason: 'failed', detail: 'This tab has no address yet' };
     }
 
     try {
       /**
-       * EVERY FRAME, not just the top one.
+       * Injected into every frame.
        *
-       * The most common real application is an embedded one: an employer's
-       * careers page with a Greenhouse or Lever form in an iframe. Scanning
-       * only the top document finds the page furniture and none of the
-       * questions, which reads to the user as "this extension does not work on
-       * the site I actually need it for".
-       *
-       * `activeTab` covers the whole tab including its subframes, so this
-       * needs no additional permission - the user's click is still the grant.
-       * Frames Chrome refuses (about:blank, a cross-origin frame mid-navigation)
-       * simply do not appear in the results.
+       * `allFrames: true` under `activeTab` covers embedded application forms -
+       * a Greenhouse or Lever iframe on a company careers page - and needs no
+       * additional permission. Frames Chrome refuses (about:blank, a
+       * cross-origin frame mid-navigation) simply do not appear in the results.
        */
       const injected = await chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
@@ -259,13 +270,33 @@ export function App(): ReactNode {
       const frameIds = injected.map((result) => result.frameId ?? 0);
       // Deduplicated and ordered with the top frame first, so the panel lists
       // the main document's fields before an embedded form's.
-      return { tabId, frameIds: [...new Set(frameIds)].sort((a, b) => a - b) };
+      return { ok: true, tabId, frameIds: [...new Set(frameIds)].sort((a, b) => a - b) };
     } catch (error) {
-      // Injection is refused on pages no extension may touch: chrome://, the
-      // Web Store, the PDF viewer, and other extensions' pages. Normal, not a
-      // bug, and the caller turns it into a readable message.
       log.debugLazy(() => ['Could not inject the scanner into this tab', error]);
-      return undefined;
+
+      /**
+       * The common case, and the one the old message got wrong.
+       *
+       * `activeTab` is granted when the user invokes the extension and revoked
+       * when the tab navigates - so the ordinary flow of opening the panel and
+       * then browsing to a job posting arrives here with no grant. It is not a
+       * blocked page; it is a page we have not been allowed onto YET, and the
+       * user can allow it in one click.
+       *
+       * The permission check is authoritative; the error-string match is a
+       * fallback for the case where Chrome refuses for a permission reason we
+       * did not anticipate.
+       */
+      const granted = await hasAccess(access.origin);
+      if (!granted || isPermissionError(error)) {
+        return { ok: false, reason: 'needs_permission', origin: access.origin };
+      }
+
+      return {
+        ok: false,
+        reason: 'failed',
+        detail: error instanceof Error ? error.message : 'The page could not be reached',
+      };
     }
   }, []);
 
@@ -297,13 +328,9 @@ export function App(): ReactNode {
     setTargetHost(await activeTabHostname());
 
     const injected = await injectScanner();
-    if (injected === undefined) {
+    if (!injected.ok) {
       setBusy(false);
-      setState({
-        kind: 'error',
-        message:
-          'This page cannot be scanned. Chrome blocks extensions on its own pages, the Web Store, and PDFs.',
-      });
+      setState({ kind: 'error', ...describeInjectionFailure(injected) });
       return;
     }
 
@@ -386,10 +413,9 @@ export function App(): ReactNode {
     // nowhere else - so the correction has to be addressed there.
     const frameId = state.kind === 'scanned' ? (state.frameByLocalId[localId] ?? 0) : 0;
 
-    const response =
-      target === undefined
-        ? undefined
-        : await sendToFrame<{ ok: boolean }>(target.tabId, frameId, {
+    const response = !target.ok
+      ? undefined
+      : await sendToFrame<{ ok: boolean }>(target.tabId, frameId, {
             type: 'CONTENT_CORRECT',
             localId,
             profilePath,
@@ -465,9 +491,12 @@ export function App(): ReactNode {
     }
 
     const target = await injectScanner();
-    if (target === undefined) {
+    if (!target.ok) {
       setBusy(false);
-      setStatus({ kind: 'error', message: 'This page can no longer be reached. Rescan.' });
+      // Reuse the same diagnosis as the scan path. A permission that lapsed
+      // between scanning and filling deserves the same one-click fix, not a
+      // vaguer message because it happened at a different moment.
+      setStatus({ kind: 'error', message: describeInjectionFailure(target).message });
       return;
     }
 
@@ -575,7 +604,13 @@ export function App(): ReactNode {
       {state.kind === 'scanning' && <p className="text-zinc-500">Reading the form...</p>}
 
       {state.kind === 'error' && (
-        <ScanError message={state.message} code={state.code} busy={busy} onRetry={handleScan} />
+        <ScanError
+          message={state.message}
+          code={state.code}
+          origin={state.origin}
+          busy={busy}
+          onRetry={handleScan}
+        />
       )}
 
       <StatusLine status={status} />
@@ -612,9 +647,52 @@ export function App(): ReactNode {
  * detected" - which is what this code path used to do - is both wrong and
  * unactionable.
  */
+/**
+ * Turn an injection failure into something true and, where possible, fixable.
+ *
+ * Each branch says what actually happened. Only the `restricted` branch blames
+ * Chrome, because only that branch is Chrome's doing - the previous single
+ * message blamed Chrome for all of them, including the one the user could have
+ * resolved in one click.
+ */
+function describeInjectionFailure(failure: InjectionFailure): {
+  message: string;
+  code?: string;
+  origin?: string;
+} {
+  switch (failure.reason) {
+    case 'restricted':
+      // Genuinely Chrome. No permission changes this, so no button is offered.
+      return { message: `${failure.detail}. Open a job application in a normal tab and try again.` };
+
+    case 'local_file':
+      return {
+        message:
+          'This is a local file. Chrome hides file:// pages from extensions unless you turn on "Allow access to file URLs" for this extension on chrome://extensions.',
+      };
+
+    case 'needs_permission':
+      // The common case, and the actionable one.
+      return {
+        message: `The extension needs your permission to read ${new URL(failure.origin).hostname}.`,
+        code: 'NEEDS_HOST_PERMISSION',
+        origin: failure.origin,
+      };
+
+    case 'no_tab':
+      return { message: 'No active tab. Click the page you want to fill, then scan again.' };
+
+    case 'failed':
+      // The honest fallback: we do not know, and we say the browser's own words
+      // rather than inventing a cause.
+      return { message: `This page could not be reached: ${failure.detail}` };
+  }
+}
+
 function ScanError({
   message,
   code,
+  origin,
   busy,
   onRetry,
 }: {
@@ -622,9 +700,54 @@ function ScanError({
   /** `| undefined` explicitly, because `exactOptionalPropertyTypes` treats an
    *  optional property and one that may hold undefined as different types. */
   code: string | undefined;
+  origin: string | undefined;
   busy: boolean;
   onRetry: () => Promise<void>;
 }): ReactNode {
+  /**
+   * The site we lack access to, offered as a one-click grant.
+   *
+   * `chrome.permissions.request` must be called straight from a user gesture -
+   * Chrome refuses otherwise, and refuses by resolving `false`, which is
+   * indistinguishable from the user declining. So it is invoked directly in
+   * this click handler, never from an effect or a retry.
+   */
+  if (code === 'NEEDS_HOST_PERMISSION' && origin !== undefined) {
+    const host = (() => {
+      try {
+        return new URL(origin).hostname;
+      } catch {
+        return origin;
+      }
+    })();
+
+    return (
+      <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+        <p className="font-medium">Allow this extension on {host}?</p>
+        <p className="text-zinc-600 dark:text-zinc-400">
+          The extension asks for no site access when you install it, so it has none here yet.
+          Allowing {host} lets it read this form. It does not grant access to any other site, and
+          you can undo it from Chrome&apos;s extension settings at any time.
+        </p>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => {
+              void (async () => {
+                const granted = await requestAccess(origin);
+                if (granted) await onRetry();
+              })();
+            }}
+            disabled={busy}
+          >
+            Allow on {host}
+          </Button>
+          <Button variant="secondary" onClick={() => void onRetry()} disabled={busy}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
   if (code === 'PROFILE_NOT_FOUND') {
     return (
       <div className="space-y-3 rounded border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
