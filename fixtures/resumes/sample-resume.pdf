@@ -1,0 +1,42 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 711 >>
+stream
+BT /F1 18 Tf 72 720 Td (Ada Lovelace) Tj ET
+BT /F1 10 Tf 72 700 Td (New Brunswick, NJ | \(609\) 555-1234 | ada@example.com) Tj ET
+BT /F1 10 Tf 72 686 Td (linkedin.com/in/ada | github.com/ada) Tj ET
+BT /F1 12 Tf 72 660 Td (EDUCATION) Tj ET
+BT /F1 10 Tf 72 644 Td (Rutgers University, New Brunswick, NJ) Tj ET
+BT /F1 10 Tf 72 630 Td (B.S. in Computer Science | GPA: 3.85 | Sep 2023 - May 2027) Tj ET
+BT /F1 12 Tf 72 604 Td (EXPERIENCE) Tj ET
+BT /F1 10 Tf 72 588 Td (Acme Corp - Software Engineering Intern | Jun 2025 - Aug 2025) Tj ET
+BT /F1 10 Tf 72 574 Td (- Built a service that processed many things) Tj ET
+BT /F1 12 Tf 72 548 Td (SKILLS) Tj ET
+BT /F1 10 Tf 72 532 Td (Languages: TypeScript, Python, Go) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001003 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1073
+%%EOF

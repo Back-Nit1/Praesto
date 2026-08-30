@@ -35,7 +35,7 @@
  * The spec's ordering is preserved exactly - as the score ranking in the
  * confidence policy, and as the explicit override rules below.
  */
-import { requiresVerifiedValue, type ProfilePath } from '@profile/paths';
+import { isProfilePath, requiresVerifiedValue, type ProfilePath } from '@profile/paths';
 import type { LearnedMappingLookup } from '@learning/types';
 import { EMPTY_LOOKUP } from '@learning/types';
 import {
@@ -54,7 +54,16 @@ import {
 } from '../descriptor/normalize';
 import type { FieldDescriptor } from '../descriptor/types';
 import { computeFingerprints, selectQuestionText } from '../fingerprints/fingerprint';
-import { ALIAS_INDEX, AUTOCOMPLETE_MAP, COMPACT_ALIAS_INDEX } from './aliases';
+import {
+  ALIAS_INDEX,
+  AUTOCOMPLETE_MAP,
+  COLLECTION_ALIAS_INDEX,
+  COMPACT_ALIAS_INDEX,
+  COMPACT_COLLECTION_ALIAS_INDEX,
+  collectionFromContext,
+  type CollectionAliasEntry,
+  type ProfileCollection,
+} from './aliases';
 import { unknownMapping, type FieldMappingResult, type MappingReason, type MappingSource } from './types';
 
 /**
@@ -67,11 +76,34 @@ import { unknownMapping, type FieldMappingResult, type MappingReason, type Mappi
  */
 export type ATSMappingRule = (descriptor: FieldDescriptor) => ProfilePath | null;
 
+/**
+ * Which entry of each repeated collection an unqualified question means.
+ *
+ * A form that asks "School" without further qualification means ONE school,
+ * and which one is a question about the applicant's profile - most recent
+ * education, current employer - not about the page. The mapper must not read a
+ * profile (that is what makes it a pure, browser-free testable function), so
+ * the service worker computes these indexes once per batch from
+ * `profile/selectors.ts` and passes them in.
+ *
+ * Defaults to the first entry of each, which is the right answer for the
+ * common case of a profile with exactly one of anything.
+ */
+export interface CollectionEntryIndexes {
+  education: number;
+  employment: number;
+  projects: number;
+}
+
+const FIRST_ENTRIES: CollectionEntryIndexes = { education: 0, employment: 0, projects: 0 };
+
 export interface MapFieldOptions {
   /** Learned corrections. Defaults to knowing nothing. */
   learned?: LearnedMappingLookup;
   /** Rules contributed by the detected ATS adapter. */
   atsRules?: readonly ATSMappingRule[];
+  /** Which education / employment / project entry an unqualified field means. */
+  entryIndexes?: CollectionEntryIndexes;
   config?: ConfidencePolicyConfig;
 }
 
@@ -88,6 +120,26 @@ interface Candidate {
    * heuristics, it is an answer that replaces them.
    */
   override?: boolean;
+  /**
+   * Set when a repeated-entity match was confirmed by the section heading the
+   * field sits under. Treated like a declaration in `selectWinner`: the page
+   * author has stated which block this question belongs to, which is not a
+   * rival interpretation of the label but a fact about the form's structure.
+   */
+  sectionConfirmed?: boolean;
+  /**
+   * Set on a repeated-entity candidate that NO section heading confirmed.
+   *
+   * Such a candidate can win when nothing else claims the field ("School"), but
+   * it does not CONTEST a scalar reading. The reasoning is asymmetric on
+   * purpose: an unqualified question on an application form is asking about the
+   * applicant, and only the form's own structure ("Education") makes it a
+   * question about one entry in a list. Without that structure, "City" is where
+   * the applicant lives - not the location of a job they once held - and
+   * treating the two as evenly matched would demote a whole class of ordinary
+   * contact fields to "needs review".
+   */
+  collectionUnconfirmed?: boolean;
   /** History attached to a learned mapping, feeding the confidence adjustment. */
   successfulUses?: number;
   correctedUses?: number;
@@ -217,6 +269,13 @@ export function mapField(
     }
   }
 
+  // --- 5b. Fields inside a repeated block ----------------------------------
+  // "School", "Employer", "Job title", and the ambiguous "Start date". These
+  // resolve to an INDEXED path, which is why they cannot come from the scalar
+  // table: the concept is education[i].institution, and `i` is a fact about the
+  // applicant that the caller supplies.
+  pushCollectionCandidates(descriptor, question, options.entryIndexes ?? FIRST_ENTRIES, config, candidates);
+
   // --- 6. Compact match (separators collapsed) -----------------------------
   // Reaches `name="e_mail_address"` and `id="firstname"`. Lossy, hence scored
   // below the exact forms.
@@ -289,6 +348,121 @@ function pushAliasCandidates(
     // First hit wins between the two forms: the unstripped match is the more
     // faithful one, and adding both would double-count a single agreement.
     return;
+  }
+}
+
+/**
+ * Propose paths into education / employment / projects.
+ *
+ * THE TWO-STEP THIS FUNCTION IMPLEMENTS
+ *   1. Which repeated-entity FIELD is this? - the alias tables answer that.
+ *   2. Which COLLECTION does it belong to? - the alias answers it when only one
+ *      table claims the wording ("school"); otherwise the section heading does
+ *      ("start date" under "Education"); otherwise nobody does, and every
+ *      claimant is pushed as a rival so the ambiguity is visible and costs
+ *      confidence instead of being resolved by table order.
+ *
+ * A match on a TRUNCATED attribute ("previous_employer_company" -> "company")
+ * is scored with `attributeSuffix`, which sits below the autofill threshold by
+ * construction: dropping a prefix can invert meaning, and this is exactly the
+ * place where "previous employer" and "employer" must not become the same
+ * question by accident.
+ */
+function pushCollectionCandidates(
+  descriptor: FieldDescriptor,
+  question: string,
+  indexes: CollectionEntryIndexes,
+  config: ConfidencePolicyConfig,
+  out: Candidate[],
+): void {
+  /** Every string worth looking up, with how much a match on it is worth. */
+  const keys: Array<{ text: string; weak: boolean }> = [];
+  if (question.length > 0) {
+    keys.push({ text: question, weak: false });
+    const stripped = stripFiller(question);
+    if (stripped !== question) keys.push({ text: stripped, weak: false });
+  }
+  for (const attribute of [descriptor.name, descriptor.id]) {
+    for (const variant of attributeNameVariants(attribute)) {
+      keys.push({ text: variant.text, weak: variant.kind === 'suffix' });
+    }
+  }
+
+  // Collect claims, keeping the STRONGEST reading of each distinct field: a
+  // question that matches both by label and by a truncated attribute is one
+  // claim, and it should be priced as the better of the two.
+  const claims = new Map<string, { entry: CollectionAliasEntry; weak: boolean; matched: string }>();
+  for (const key of keys) {
+    if (key.text.length === 0) continue;
+
+    const exact = COLLECTION_ALIAS_INDEX.get(key.text);
+    const compact = key.text.replace(/[^a-z0-9]/g, '');
+    // Two characters match by accident; below three the compact index is noise.
+    const loose = exact === undefined && compact.length >= 3
+      ? COMPACT_COLLECTION_ALIAS_INDEX.get(compact)
+      : undefined;
+
+    for (const entry of exact ?? loose ?? []) {
+      const id = `${entry.collection}.${entry.field}`;
+      const existing = claims.get(id);
+      if (existing === undefined || (existing.weak && !key.weak)) {
+        claims.set(id, { entry, weak: key.weak, matched: key.text });
+      }
+    }
+  }
+
+  if (claims.size === 0) return;
+
+  // The section heading first, then the wider context. `nearbyText` is included
+  // because plenty of forms mark their blocks with a styled div rather than a
+  // heading element, and the block's own prose still says "Education".
+  const context = collectionFromContext(
+    [descriptor.sectionHeading, descriptor.label, descriptor.nearbyText]
+      .filter((part): part is string => part !== undefined)
+      .join(' ')
+      .toLowerCase(),
+  );
+
+  const claimed = [...claims.values()];
+  const collections = new Set<ProfileCollection>(claimed.map((claim) => claim.entry.collection));
+  const confirmed =
+    context !== null && collections.has(context) ? context : null;
+
+  // When the heading names a collection that actually claimed this wording,
+  // the other collections' readings are eliminated - not merely outscored. The
+  // page told us which block this is, and a competing reading of the same
+  // words is not evidence against a structural fact.
+  const selected = confirmed === null ? claimed : claimed.filter((c) => c.entry.collection === confirmed);
+
+  for (const claim of selected) {
+    const index = indexes[claim.entry.collection];
+    const path = `${claim.entry.collection}[${index}].${claim.entry.field}`;
+    // Guards a typo in an alias table: a field name that is not in the path
+    // registry would otherwise become a mapping that can never resolve.
+    if (!isProfilePath(path)) continue;
+
+    const score = claim.weak
+      ? config.sourceScores.attributeSuffix
+      : confirmed !== null
+        ? config.sourceScores.collectionAliasWithSection
+        : config.sourceScores.collectionAlias;
+
+    out.push({
+      path,
+      score,
+      source: 'alias',
+      ...(confirmed !== null && !claim.weak
+        ? { sectionConfirmed: true }
+        : { collectionUnconfirmed: true }),
+      reason: {
+        signal: confirmed !== null ? 'section_context' : 'label_exact',
+        matched: claim.matched,
+        score,
+        detail: confirmed !== null
+          ? `${claim.entry.field} under a ${confirmed} section`
+          : `${claim.entry.collection}.${claim.entry.field}`,
+      },
+    });
   }
 }
 
@@ -379,7 +553,15 @@ function selectWinner(
   // genuinely ambiguous ("start date" under no section heading). We report it
   // and pay for it, rather than presenting our first choice as certain.
   const rivals = sorted.filter((c) => c.path !== winner.path);
-  const strongestRival = rivals[0];
+
+  // An unconfirmed repeated-entity reading is a fallback, not a rival: see
+  // `collectionUnconfirmed`. It still appears in `alternatives` below, so the
+  // ambiguity stays visible in the debug view - it simply does not cost the
+  // scalar reading its confidence.
+  const contestingRivals = rivals.filter(
+    (c) => !(c.collectionUnconfirmed === true && winner.collectionUnconfirmed !== true),
+  );
+  const strongestRival = contestingRivals[0];
 
   // Two winners are immune to the ambiguity penalty, for the same underlying
   // reason: they are not interpretations competing with other interpretations,
@@ -394,7 +576,12 @@ function selectWinner(
   // Without this, a page that does everything right (a correct autocomplete
   // attribute AND a human label) would be punished for the label being vaguer
   // than the attribute - penalising exactly the markup we most want to trust.
-  const winnerIsDeclaration = winner.source === 'html' || winner.override === true;
+  //   section   the page grouped this question under a heading that names the
+  //             block it belongs to. "Start date" under "Education" is not a
+  //             contested reading of "start date" - the form has told us which
+  //             start date it means.
+  const winnerIsDeclaration =
+    winner.source === 'html' || winner.override === true || winner.sectionConfirmed === true;
   const contested =
     strongestRival !== undefined &&
     strongestRival.score >= winner.score - CONTEST_MARGIN &&

@@ -300,10 +300,18 @@ export const ALIASES: Readonly<Partial<Record<ProfilePath, readonly string[]>>> 
 /**
  * Aliases for fields inside a repeated education/employment/project block.
  *
- * Kept separate from the scalar table because the mapper resolves these against
- * an ENTRY (which school? which job?), not against a fixed path. The entry is
- * chosen from the section context or the field's position within the block -
- * a different problem, so a different table.
+ * Kept separate from the scalar table because these resolve against an ENTRY
+ * (which school? which job?), not against a fixed path. The mapper turns a
+ * match here into an indexed path - `education[0].institution` - using an entry
+ * index the service worker supplies from the profile, so the mapper itself
+ * stays a pure function that has never read a profile.
+ *
+ * WHY THE COLLISIONS IN THESE TABLES ARE THE INTERESTING PART
+ * "start date", "end date", "location" and "description" appear in more than
+ * one of these tables, and "start date" is also a scalar alias for the
+ * applicant's availability. Those collisions are real ambiguity in the source
+ * material, not a defect in the tables: on a page the only thing that resolves
+ * them is the section the question sits under. See `collectionFromContext`.
  */
 export const EDUCATION_FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   institution: ['school', 'university', 'college', 'institution', 'school name', 'university name'],
@@ -338,6 +346,115 @@ export const PROJECT_FIELD_ALIASES: Readonly<Record<string, readonly string[]>> 
   technologies: ['technologies', 'tech stack', 'tools used', 'technologies used'],
   url: ['project url', 'project link', 'repository', 'repo url', 'demo link'],
 };
+
+// ---------------------------------------------------------------------------
+// Repeated-entity lookup
+// ---------------------------------------------------------------------------
+
+/** The three repeated collections in the profile. */
+export type ProfileCollection = 'education' | 'employment' | 'projects';
+
+/** One claim on an alias by a field inside a repeated collection. */
+export interface CollectionAliasEntry {
+  collection: ProfileCollection;
+  /** A field name from EDUCATION_FIELDS / EMPLOYMENT_FIELDS / PROJECT_FIELDS. */
+  field: string;
+}
+
+const COLLECTION_TABLES: ReadonlyArray<
+  readonly [ProfileCollection, Readonly<Record<string, readonly string[]>>]
+> = [
+  ['education', EDUCATION_FIELD_ALIASES],
+  ['employment', EMPLOYMENT_FIELD_ALIASES],
+  ['projects', PROJECT_FIELD_ALIASES],
+];
+
+/**
+ * Reverse index across all three repeated-entity tables.
+ *
+ * The value is an array for the same reason the scalar index's is: "start date"
+ * is claimed by both education and employment, and recording BOTH claims is
+ * what lets the mapper see the ambiguity and lower its confidence, rather than
+ * silently taking whichever table was defined first.
+ */
+function buildCollectionAliasIndex(): ReadonlyMap<string, readonly CollectionAliasEntry[]> {
+  const index = new Map<string, CollectionAliasEntry[]>();
+  for (const [collection, table] of COLLECTION_TABLES) {
+    for (const [field, aliases] of Object.entries(table)) {
+      for (const alias of aliases) {
+        const entry: CollectionAliasEntry = { collection, field };
+        const existing = index.get(alias);
+        if (existing === undefined) index.set(alias, [entry]);
+        else existing.push(entry);
+      }
+    }
+  }
+  return index;
+}
+
+export const COLLECTION_ALIAS_INDEX: ReadonlyMap<string, readonly CollectionAliasEntry[]> =
+  buildCollectionAliasIndex();
+
+/** Same index keyed by the compact form, for `name="school_name"`. */
+function buildCompactCollectionIndex(): ReadonlyMap<string, readonly CollectionAliasEntry[]> {
+  const index = new Map<string, CollectionAliasEntry[]>();
+  for (const [alias, entries] of COLLECTION_ALIAS_INDEX) {
+    const compact = alias.replace(/[^a-z0-9]/g, '');
+    const existing = index.get(compact);
+    if (existing === undefined) index.set(compact, [...entries]);
+    else {
+      for (const entry of entries) {
+        const duplicate = existing.some(
+          (candidate) => candidate.collection === entry.collection && candidate.field === entry.field,
+        );
+        if (!duplicate) existing.push(entry);
+      }
+    }
+  }
+  return index;
+}
+
+export const COMPACT_COLLECTION_ALIAS_INDEX: ReadonlyMap<string, readonly CollectionAliasEntry[]> =
+  buildCompactCollectionIndex();
+
+/**
+ * Which repeated block a piece of page context is talking about.
+ *
+ * This is the signal that disambiguates the collisions above, and it is the
+ * reason `sectionHeading` is collected during the scan at all. "Start date"
+ * under "Education" and "Start date" under "Work experience" are different
+ * questions with identical labels; no amount of label analysis can separate
+ * them, and the heading separates them immediately.
+ *
+ * Deliberately conservative:
+ *   - the patterns are word-bounded, so "workday" is not "work";
+ *   - a text that matches SEVERAL collections returns null rather than picking
+ *     one, because a heading like "Education and work history" tells us the
+ *     page groups them together and therefore tells us nothing about which one
+ *     this field belongs to.
+ */
+const COLLECTION_CONTEXT_PATTERNS: ReadonlyArray<readonly [ProfileCollection, RegExp]> = [
+  [
+    'education',
+    /\b(education|educational|school|schooling|university|college|academic|academics|alma mater|degree|coursework)\b/,
+  ],
+  [
+    'employment',
+    /\b(experience|employment|employer|work history|working history|professional background|previous position|current position|job history|positions held)\b/,
+  ],
+  ['projects', /\b(project|projects|portfolio piece|side project)\b/],
+];
+
+export function collectionFromContext(text: string | undefined): ProfileCollection | null {
+  if (text === undefined || text.length === 0) return null;
+
+  const matched = COLLECTION_CONTEXT_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(
+    ([collection]) => collection,
+  );
+
+  // Exactly one, or we know nothing useful.
+  return matched.length === 1 ? (matched[0] ?? null) : null;
+}
 
 /**
  * Reverse index: normalized alias -> the paths that claim it.

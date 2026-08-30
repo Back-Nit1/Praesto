@@ -85,6 +85,25 @@ export interface ConfidencePolicyConfig {
     readonly attributeSuffix: number;
     readonly learnedMapping: number;
     readonly compactAlias: number;
+    /**
+     * A field inside a repeated block (education / employment / projects)
+     * whose alias is claimed by exactly one collection - "school", "employer",
+     * "job title". Scored like an exact name match: the alias itself is
+     * unambiguous about which block it belongs to, so no section heading is
+     * needed to trust it.
+     *
+     * When an alias IS claimed by several collections ("start date"), the
+     * mapper pushes a candidate for each, they compete, and the ambiguity
+     * machinery in `selectWinner` pushes the result below the autofill line.
+     */
+    readonly collectionAlias: number;
+    /**
+     * The same match, with the surrounding section heading agreeing about
+     * which block it is. Above `exactAlias` deliberately: "Start date" under an
+     * "Education" heading IS the education start date, and it must outrank the
+     * scalar reading of the same words (the applicant's availability date).
+     */
+    readonly collectionAliasWithSection: number;
     readonly fuzzy: number;
   };
 
@@ -138,6 +157,8 @@ export const DEFAULT_CONFIDENCE_POLICY: ConfidencePolicyConfig = {
     attributeSuffix: 0.88, // only the tail of a namespaced name matched - a guess
     learnedMapping: 0.96, // the user personally taught us this one
     compactAlias: 0.9, // matches once separators are collapsed
+    collectionAlias: 0.96, // "school" / "employer" - unambiguous about its block
+    collectionAliasWithSection: 0.98, // ...and the section heading agrees
     fuzzy: 0.82, // token overlap only - BELOW autofillThreshold by design
   },
 

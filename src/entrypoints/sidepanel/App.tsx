@@ -46,7 +46,14 @@ import {
   type ResumePayload,
 } from '@shared/page-protocol';
 import { createLogger } from '@shared/logging';
-import { labelForPath, SCALAR_PROFILE_PATHS } from '@profile/paths';
+import {
+  EDUCATION_FIELDS,
+  EMPLOYMENT_FIELDS,
+  PROJECT_FIELDS,
+  labelForPath,
+  SCALAR_PROFILE_PATHS,
+} from '@profile/paths';
+import { StoredProfileRepository } from '@profile/repository';
 import type { MappingScope } from '@learning/types';
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { ResumeDocumentStore } from '@storage/documents';
@@ -55,6 +62,7 @@ import { ResumeDocumentStore } from '@storage/documents';
 const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
 const settings = new ChromeLocalStore();
 const resumes = new ResumeDocumentStore();
+const profiles = new StoredProfileRepository(settings);
 
 /**
  * Read the user's default resume and encode it for the page.
@@ -794,6 +802,76 @@ function rowState(action: ResolvedFieldAction, outcome: FieldFillReport | undefi
   return 'missing';
 }
 
+/** One choice in the correction dropdown, grouped for readability. */
+interface PathChoice {
+  group: string;
+  value: string;
+  label: string;
+}
+
+/**
+ * Everything a field can be corrected TO, including the repeated entries.
+ *
+ * The scalar list alone is not enough now that education and employment map:
+ * a user who sees "School" mapped to the wrong degree needs to be able to say
+ * "this is my second school", and a dropdown of scalar paths cannot express
+ * that. The entries come from the profile itself, so the list names the
+ * user's actual schools and jobs rather than an abstract index.
+ *
+ * Reading the profile directly is allowed here: the side panel is an extension
+ * page, not a content script (see hooks/use-profile.ts).
+ */
+function useCorrectablePaths(): PathChoice[] {
+  const [choices, setChoices] = useState<PathChoice[]>(() =>
+    SCALAR_PROFILE_PATHS.map((path) => ({
+      group: 'Your details',
+      value: path,
+      label: labelForPath(path),
+    })),
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const loaded = await profiles.load();
+      if (!loaded.ok || loaded.value === undefined) return;
+      const profile = loaded.value;
+
+      const collections: Array<[string, readonly string[], Array<{ name: string | null }>]> = [
+        [
+          'education',
+          EDUCATION_FIELDS,
+          profile.education.map((entry) => ({ name: entry.institution.value })),
+        ],
+        [
+          'employment',
+          EMPLOYMENT_FIELDS,
+          profile.employment.map((entry) => ({ name: entry.company.value })),
+        ],
+        ['projects', PROJECT_FIELDS, profile.projects.map((entry) => ({ name: entry.name.value }))],
+      ];
+
+      const entryChoices: PathChoice[] = [];
+      for (const [collection, fields, entries] of collections) {
+        entries.forEach((entry, index) => {
+          // Named by what the user called it, falling back to a number. "MIT"
+          // is findable in a dropdown; "Education 2" is a puzzle.
+          const group = entry.name ?? `${collection} ${index + 1}`;
+          for (const field of fields) {
+            const value = `${collection}[${index}].${field}`;
+            entryChoices.push({ group, value, label: labelForPath(value).split(' - ')[1] ?? field });
+          }
+        });
+      }
+
+      if (entryChoices.length > 0) {
+        setChoices((current) => [...current, ...entryChoices]);
+      }
+    })();
+  }, []);
+
+  return choices;
+}
+
 /**
  * Pick what a field means, and how widely to remember it.
  *
@@ -818,6 +896,16 @@ function CorrectionPicker({
 }): ReactNode {
   const [path, setPath] = useState<string>(currentPath ?? '');
   const [scope, setScope] = useState<MappingScope>('global');
+  const choices = useCorrectablePaths();
+
+  // Grouped in the order the choices were built: the user's own details first,
+  // then one group per school, job and project.
+  const groups = choices.reduce<Map<string, PathChoice[]>>((accumulator, choice) => {
+    const existing = accumulator.get(choice.group);
+    if (existing === undefined) accumulator.set(choice.group, [choice]);
+    else existing.push(choice);
+    return accumulator;
+  }, new Map());
 
   const SCOPE_LABELS: Array<{ value: MappingScope; label: string; hint: string }> = [
     { value: 'global', label: 'Everywhere', hint: 'Any site that asks this' },
@@ -839,10 +927,14 @@ function CorrectionPicker({
               stop offering this field, which is itself a correction worth
               remembering. */}
           <option value="">Nothing - leave this field alone</option>
-          {SCALAR_PROFILE_PATHS.map((candidate) => (
-            <option key={candidate} value={candidate}>
-              {labelForPath(candidate)}
-            </option>
+          {[...groups.entries()].map(([group, entries]) => (
+            <optgroup key={group} label={group}>
+              {entries.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>

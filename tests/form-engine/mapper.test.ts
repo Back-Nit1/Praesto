@@ -131,14 +131,23 @@ describe('mapField - refusing to guess', () => {
 
 describe('mapField - ambiguity', () => {
   it('reports competing interpretations instead of hiding them', () => {
-    // "Start date" is a real alias for both an education start date and an
-    // employment start date, plus the availability question.
+    // "Start date" is a real alias for an education start date, an employment
+    // start date, and the availability question. The alternatives must be
+    // REPORTED whichever one wins - discarding them is how a mapper starts
+    // presenting one reading of an ambiguous question as the only reading.
     const result = mapField(descriptor({ label: 'Start date' }));
     expect(result.profilePath).not.toBeNull();
-    // Whatever we chose, the confidence must acknowledge we could be wrong.
-    if ((result.alternatives?.length ?? 0) > 0) {
-      expect(result.confidence).toBeLessThan(AUTOFILL);
-    }
+    expect((result.alternatives ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('does not autofill when two equally supported readings compete', () => {
+    // "End date" is claimed by an education graduation date and by an
+    // employment end date, and by nothing else. Neither reading has section
+    // evidence, so neither may win outright: this is the case where the
+    // confidence must acknowledge that we genuinely do not know which block the
+    // question belongs to.
+    const result = mapField(descriptor({ label: 'End date' }));
+    expect(result.confidence).toBeLessThan(AUTOFILL);
   });
 });
 
