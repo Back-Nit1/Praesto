@@ -1,0 +1,83 @@
+/**
+ * WXT build configuration.
+ * ---------------------------------------------------------------------------
+ * WXT is the build framework for this Manifest V3 extension. It owns:
+ *   - manifest.json generation (from the `manifest` block below + entrypoints),
+ *   - bundling each extension context (service worker / content script / UI pages)
+ *     with the correct output format,
+ *   - dev-mode hot reload.
+ *
+ * WHY WXT AND NOT A HAND-ROLLED VITE SETUP
+ * MV3 has four separate bundle targets with incompatible constraints (the
+ * service worker cannot use DOM globals, the content script must be an IIFE
+ * that cannot collide with the host page, the UI pages are normal SPAs). WXT
+ * encodes those constraints so we do not re-derive them and get them subtly
+ * wrong. Every rule in the build stays declarative and reviewable in this file.
+ */
+import { defineConfig } from 'wxt';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  // Source lives under src/ so the repo root stays readable (docs, fixtures,
+  // config) and the bundler has a single unambiguous root to watch.
+  srcDir: 'src',
+
+  modules: ['@wxt-dev/module-react'],
+
+  manifest: {
+    name: 'Personal Job Application Agent',
+    description:
+      'Fills job applications from your own verified profile. Leaves anything it is not sure about blank.',
+    version: '0.1.0',
+
+    /**
+     * PERMISSION MINIMALISM
+     * Every permission here is a promise to the user and a Chrome Web Store
+     * review risk. We request only what the architecture actually needs:
+     *
+     *  storage    - chrome.storage.local for profile metadata + settings.
+     *  sidePanel  - the review/audit surface described in spec section 22.
+     *  scripting  - lets the service worker inject the scanner on demand rather
+     *               than force-running a content script on every page load.
+     *  activeTab  - grants temporary host access to the tab the user clicked the
+     *               extension on. This is the key privacy lever: it means we do
+     *               NOT need `<all_urls>` host permissions at install time.
+     *
+     * NOT requested (deliberately): host_permissions for <all_urls>, tabs,
+     * webRequest, cookies, history. Any future ATS-specific host permission
+     * should be added as an OPTIONAL permission the user grants per site.
+     */
+    permissions: ['storage', 'sidePanel', 'scripting', 'activeTab'],
+
+    /**
+     * Optional host permissions: requested at runtime, per origin, only when the
+     * user asks the extension to work on a site. Chrome shows a native prompt.
+     * This keeps the install-time permission warning as small as possible, which
+     * materially affects install conversion for a public extension.
+     */
+    optional_host_permissions: ['https://*/*'],
+
+    action: { default_title: 'Personal Job Application Agent' },
+
+    // Opening the side panel from the toolbar icon is handled in background.ts
+    // via chrome.sidePanel.setPanelBehavior.
+    side_panel: { default_path: 'sidepanel.html' },
+
+    // No remote code, no eval. Explicit CSP so the Web Store reviewer (and any
+    // future contributor) can see the guarantee rather than infer it.
+    content_security_policy: {
+      extension_pages: "script-src 'self'; object-src 'self';",
+    },
+  },
+
+  vite: () => ({
+    plugins: [tailwindcss()],
+    build: {
+      // Extension bundles ship to the user's disk and are parsed on every
+      // service-worker wake-up. Smaller output = faster cold start on low-end
+      // machines. Source maps only in dev.
+      sourcemap: process.env.NODE_ENV !== 'production',
+      target: 'chrome110',
+    },
+  }),
+});

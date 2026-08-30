@@ -1,0 +1,33 @@
+{
+  // WXT generates .wxt/tsconfig.json with the correct lib/types for each
+  // extension context (chrome types, DOM, etc). We extend it and add only our
+  // own strictness and module-boundary aliases on top.
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+
+    // Beyond `strict`: these catch the classes of bug that hurt most in a
+    // codebase whose whole value proposition is "never confidently wrong".
+    "noUncheckedIndexedAccess": true,     // arr[i] is T | undefined - forces us to handle missing fields
+    "exactOptionalPropertyTypes": true,   // `{a?: string}` cannot be set to undefined by accident
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["./src/packages/shared/*"],
+      "@storage/*": ["./src/packages/storage/*"],
+      "@profile/*": ["./src/packages/profile/*"],
+      "@form-engine/*": ["./src/packages/form-engine/*"],
+      "@fill-engine/*": ["./src/packages/fill-engine/*"],
+      "@ats/*": ["./src/packages/ats/*"],
+      "@learning/*": ["./src/packages/learning/*"]
+    }
+  },
+  "include": ["src", "tests", "fixtures", "*.config.ts"]
+}

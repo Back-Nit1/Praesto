@@ -1,0 +1,14 @@
+node_modules/
+.wxt/
+.output/
+dist/
+coverage/
+*.local
+.DS_Store
+*.log
+
+# Applicant data must never be committed. The extension stores everything in
+# browser storage, but developers export JSON profiles for debugging (see
+# Phase 1 import/export) and those files contain real PII.
+*.profile.json
+/local/
