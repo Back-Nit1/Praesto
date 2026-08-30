@@ -1,8 +1,11 @@
 node_modules/
 .wxt/
 .output/
-dist/
 coverage/
+
+# The unpacked extension build. Ignored because it is generated - run
+# `npm run build` to produce it, then load dist/chrome-mv3 in Chrome.
+dist/
 *.local
 .DS_Store
 *.log

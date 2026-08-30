@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-08-30
-**Tests:** 206 passing · **Typecheck:** clean · **Build:** 503 kB
+**Tests:** 206 passing · **Typecheck:** clean · **Build:** 513 kB (`dist/chrome-mv3`)
 
 ---
 
@@ -277,7 +277,8 @@ name a field; it cannot address a DOM node.
 ## Verification
 
 ```
-npm run compile   # tsc --noEmit, strict
-npm test          # 188 tests
-npm run build     # loads unpacked from .output/chrome-mv3
+npm run compile    # tsc --noEmit, strict
+npm test           # 206 tests
+npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
+npm run fixtures   # practice forms at http://localhost:5174
 ```

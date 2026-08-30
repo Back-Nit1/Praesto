@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Personal Job Application Agent - a Chrome MV3 extension that fills job applications from a verified applicant profile, and refuses to guess.",
-  "engines": { "node": ">=20.19.0" },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
+    "fixtures": "node scripts/serve-fixtures.mjs",
+    "icons": "python3 scripts/generate-icons.py",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "vitest run",
@@ -35,6 +39,6 @@
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0",
-    "wxt": "^0.20.0"
+    "wxt": "^0.20.27"
   }
 }

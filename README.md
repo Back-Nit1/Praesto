@@ -21,20 +21,47 @@ will stop and ask when it genuinely does not know.
 
 ```bash
 npm install
+npm run build      # -> dist/chrome-mv3   (load this folder in Chrome)
 npm run dev        # dev build with hot reload
-npm run build      # production build -> .output/chrome-mv3
 npm test           # 206 tests
 npm run compile    # typecheck
+npm run fixtures   # serve the practice forms at http://localhost:5174
 ```
 
-**Load it in Chrome:**
+### Load it in Chrome
 
-1. `npm run build`
-2. Open `chrome://extensions`
-3. Turn on **Developer mode**
-4. **Load unpacked** → select `.output/chrome-mv3`
-5. Click the extension icon → **Edit your profile** → fill in your details
-6. Open a job application, click the extension icon, then **Scan this page**
+1. **`npm run build`**
+2. Open **`chrome://extensions`**
+3. Turn on **Developer mode** (top right)
+4. Click **Load unpacked** and select the **`dist/chrome-mv3`** folder
+
+   Full path on this machine:
+   ```
+   /Users/nityanthmaramreddy/applicanttool/dist/chrome-mv3
+   ```
+   In the file picker you can hit <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> and paste
+   that path.
+5. Pin the extension, click its icon, then **Edit your profile** and fill in
+   your details. **Save changes.**
+
+### Try it
+
+```bash
+npm run fixtures
+```
+
+Open <http://localhost:5174>, pick a form, click the extension icon, then
+**Scan this page**. What each fixture is for:
+
+| Fixture | What should happen |
+|---|---|
+| `basic-contact` | Everything fills. |
+| `ambiguous-fields` | **Nothing** fills. The emergency-contact phone and the reference email are traps; the pre-filled email must be left untouched. |
+| `radio-authorization` | Recognised, but never answered unless you set those answers yourself in the profile editor. |
+| `native-select` | Country and state match — without picking *West Virginia* for *Virginia*. |
+
+Then try the learning loop: on `ambiguous-fields`, click **Change** on a field,
+tell it what that question means, and rescan.
 
 Nothing is filled until you click **Fill safe fields**, and the extension never
 submits an application.
