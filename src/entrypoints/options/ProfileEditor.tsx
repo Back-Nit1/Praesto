@@ -402,7 +402,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       </Section>
 
       <Section title="Education">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           Most applications ask about one school. The one with the most recent graduation date is
           the one offered first, so list them in whatever order suits you.
         </p>
@@ -487,7 +487,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           explicitly, and the confidence policy refuses to autofill them from
           anything but a value the user set on this screen.
         */}
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           These are never guessed from your resume, your name, or where you live. The extension will
           leave them blank on an application until you answer them here.
         </p>
@@ -525,7 +525,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           "Decline to self-identify" is a legitimate answer and is stored,
           matched and filled like any other.
         */}
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           Entirely optional, and never inferred from anything. Leave any of these blank and the
           extension will leave the matching question on an application blank too. Write your answer
           the way you want it to appear - including "Decline to self-identify".
@@ -807,7 +807,7 @@ function DateField({
         {...(hint !== undefined ? { hint } : {})}
       />
       {readback !== undefined && (
-        <span className="mt-1 block text-xs text-zinc-500">
+        <span className="mt-1.5 block text-[11px] text-[--app-muted]">
           {readback}
           {parsed?.ambiguousDayMonth === true && ' - this could be read two ways; add the month name'}
         </span>

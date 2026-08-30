@@ -389,7 +389,7 @@ function ReviewExtraction({
       {(parsed.education.length > 0 ||
         parsed.employment.length > 0 ||
         parsed.projects.length > 0) && (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3 text-sm leading-relaxed text-[--app-muted]">
           Also found {parsed.education.length} education, {parsed.employment.length} experience and{' '}
           {parsed.projects.length} project entries. These are added as-is — review them in the
           Profile tab, where you can correct anything that was read wrong.

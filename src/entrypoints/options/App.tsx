@@ -203,7 +203,7 @@ export function App(): ReactNode {
                 <p className="workspace-subtitle">{active.description}</p>
               </div>
 
-              <div className="workspace-actions">
+              {tab === 'profile' && <div className="workspace-actions">
                 <Button variant="ghost" onClick={handleExport}>
                   <DownloadIcon /> Export
                 </Button>
@@ -230,7 +230,7 @@ export function App(): ReactNode {
                     </>
                   )}
                 </Button>
-              </div>
+              </div>}
             </header>
 
             <StatusLine status={status} />

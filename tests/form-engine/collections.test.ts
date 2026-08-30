@@ -131,6 +131,13 @@ describe('mapField - generic words need the section to mean an entry', () => {
     expect(result.profilePath).toBe('employment[0].location');
   });
 
+  it('does not read "Work location" as a past employer\'s address', () => {
+    // On an application this asks where the ROLE is based, or where the
+    // applicant would work - never where a previous job was.
+    const result = mapField(descriptor({ label: 'Work location' }));
+    expect(result.profilePath).not.toBe('employment[0].location');
+  });
+
   it('does not read a bare "Role" as a previous job title', () => {
     // On an application, "Role" is usually the role being applied for.
     const result = mapField(descriptor({ label: 'Role' }));

@@ -30,7 +30,8 @@
       "@resume-parser/*": ["./src/packages/resume-parser/*"],
       "@fill-engine/*": ["./src/packages/fill-engine/*"],
       "@ats/*": ["./src/packages/ats/*"],
-      "@learning/*": ["./src/packages/learning/*"]
+      "@learning/*": ["./src/packages/learning/*"],
+      "@backend/*": ["./src/packages/backend/*"]
     }
   },
   "include": ["src", "tests", "fixtures", "*.config.ts"]

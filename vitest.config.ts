@@ -27,6 +27,9 @@ export default defineConfig({
       '@fill-engine': r('./src/packages/fill-engine'),
       '@ats': r('./src/packages/ats'),
       '@learning': r('./src/packages/learning'),
+      // The network gateway. Isolated in its own package so "what can this
+      // extension talk to" is answerable by reading one directory.
+      '@backend': r('./src/packages/backend'),
     },
   },
   test: {

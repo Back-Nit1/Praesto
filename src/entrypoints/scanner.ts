@@ -98,6 +98,13 @@ export default defineUnlistedScript(() => {
     /** Descriptors from the most recent scan, kept for correction reporting. */
     let lastDescriptors: FieldDescriptor[] = [];
 
+    /**
+     * Whether this frame has already told the panel it changed since the last
+     * scan. Reset by a scan, because after one the panel's list is current
+     * again and the next change is news.
+     */
+    let changeAlreadyReported = false;
+
     const budget = getRuntimeBudget();
 
     /**
@@ -149,6 +156,9 @@ export default defineUnlistedScript(() => {
       for (const [localId, element] of elements) elementsById.set(localId, element);
 
       lastDescriptors = scan.fields;
+      // The panel now has a current list, so the next reveal is worth
+      // reporting again.
+      changeAlreadyReported = false;
 
       if (scan.fields.length === 0) return { actions: [], fieldsDetected: 0 };
 
@@ -655,38 +665,55 @@ export default defineUnlistedScript(() => {
       log.debug('No application-shaped form on this page');
     } else {
       log.info('Application-shaped page detected; ready to scan on request');
+
+      /**
+       * Watch for dynamically revealed fields - in this frame only, and only
+       * when this frame holds something form-shaped.
+       *
+       * BOTH CONDITIONS MATTER, because the scanner is injected into EVERY
+       * frame of the tab (that is what makes an embedded application form
+       * work). An advertising iframe re-renders constantly; observing it would
+       * wake the service worker on a timer forever, on the low-power machines
+       * this extension is built for, to report a change in a frame with no
+       * form in it.
+       *
+       * This NEVER fills. A form that reveals a question in response to an
+       * answer must not have that question answered without the user seeing
+       * it. It tells the side panel the page changed; the user's click remains
+       * the only thing that acts.
+       */
+      watchForNewFields(() => {
+        // At most one nudge per scan. The panel's response is a single banner
+        // offering a rescan - it does not get more useful the tenth time, and
+        // a framework re-render can fire this every debounce window for as
+        // long as the page is open.
+        if (changeAlreadyReported) return;
+        changeAlreadyReported = true;
+
+        log.debugLazy(() => ['New nodes appeared; a rescan would be useful']);
+
+        // Broadcast rather than addressed: a content script cannot message an
+        // extension page directly. Every listening extension context receives
+        // this, which is how it reaches the side panel. The worker recognises
+        // the type and answers OK; it takes no action on it.
+        void chrome.runtime
+          .sendMessage({
+            type: 'PAGE_FIELDS_CHANGED',
+            version: MESSAGE_PROTOCOL_VERSION,
+            page: {
+              url: location.href,
+              hostname: location.hostname,
+              ats: detectATS(
+                { url: location.href, hostname: location.hostname, title: document.title },
+                document,
+              ),
+            },
+          })
+          .catch(() => {
+            // Nothing was listening - the panel is closed, or the worker is
+            // asleep and the page is idle. Not a problem worth a log line.
+          });
+      });
     }
-
-    // Watch for dynamically revealed fields.
-    //
-    // This NEVER fills. A form that reveals a question in response to an answer
-    // must not have that question answered without the user seeing it. What it
-    // does is tell the side panel that the page has changed, so the panel can
-    // offer a rescan - the user's click remains the only thing that acts.
-    watchForNewFields(() => {
-      log.debugLazy(() => ['New nodes appeared; a rescan would be useful']);
-
-      // Broadcast rather than addressed: a content script cannot message an
-      // extension page directly. Every listening extension context receives
-      // this, which is how it reaches the side panel. The worker recognises the
-      // type and answers OK; it takes no action on it.
-      void chrome.runtime
-        .sendMessage({
-          type: 'PAGE_FIELDS_CHANGED',
-          version: MESSAGE_PROTOCOL_VERSION,
-          page: {
-            url: location.href,
-            hostname: location.hostname,
-            ats: detectATS(
-              { url: location.href, hostname: location.hostname, title: document.title },
-              document,
-            ),
-          },
-        })
-        .catch(() => {
-          // Nothing was listening - the panel is closed, or the worker is
-          // asleep and the page is idle. Not a problem worth a log line.
-        });
-    });
   }
 });

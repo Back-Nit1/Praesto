@@ -440,6 +440,12 @@ export const COMPACT_COLLECTION_ALIAS_INDEX: ReadonlyMap<string, readonly Collec
  */
 export const SECTION_ONLY_COLLECTION_ALIASES: ReadonlySet<string> = new Set([
   'location',
+  // "Job location" and "work location" read as questions about the ROLE being
+  // applied for - where it is based, where the applicant would work - not
+  // about a past employer's address. A previous job's location is only ever
+  // asked inside a work-history block, which confirms it anyway.
+  'job location',
+  'work location',
   'city',
   'title',
   'role',
