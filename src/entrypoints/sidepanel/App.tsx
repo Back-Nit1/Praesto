@@ -97,6 +97,35 @@ async function loadResumePayload(): Promise<ResumePayload | undefined> {
   return { name: file.value.name, type: file.value.type, base64: btoa(binary) };
 }
 
+/**
+ * SECURITY: only ordinary web pages may be scanned or filled.
+ *
+ * Deliberately an ALLOWLIST of schemes rather than a denylist of chrome:// and
+ * friends. A denylist has to be right about every scheme a browser will ever
+ * add; an allowlist is wrong only in the safe direction (an unusual page is
+ * not scanned).
+ */
+function isScannableUrl(url: string | undefined): boolean {
+  if (url === undefined) return false;
+  try {
+    const scheme = new URL(url).protocol;
+    return scheme === 'https:' || scheme === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+/** Hostname of the active tab, for showing the user where their data goes. */
+async function activeTabHostname(): Promise<string | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!isScannableUrl(tab?.url)) return undefined;
+  try {
+    return new URL(tab?.url ?? '').hostname;
+  } catch {
+    return undefined;
+  }
+}
+
 const log = createLogger('sidepanel');
 
 /**
@@ -137,6 +166,15 @@ export function App(): ReactNode {
   });
   /** Set when the page revealed new questions after the last scan. */
   const [pageChanged, setPageChanged] = useState(false);
+  /**
+   * Hostname of the page the last scan ran against.
+   *
+   * SECURITY / UX: the panel outlives the tab it was opened over. Clicking
+   * Fill pushes profile values - and possibly the applicant's resume - into
+   * whatever page is active AT THAT MOMENT, which is not necessarily the page
+   * that was scanned. Naming the target out loud is what lets the user notice.
+   */
+  const [targetHost, setTargetHost] = useState<string | undefined>(undefined);
 
   /**
    * Listen for the scanner's "this form changed" broadcast.
@@ -180,6 +218,24 @@ export function App(): ReactNode {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id === undefined) return undefined;
     const tabId = tab.id;
+
+    /**
+     * SECURITY: refuse a target that is not an ordinary web page.
+     *
+     * `chrome.scripting.executeScript` would fail on these anyway, but failing
+     * with a clear reason here is worth the four lines: the panel can say
+     * "this page cannot be scanned" instead of surfacing an opaque injection
+     * error, and it documents the intent - this extension carries a person's
+     * identity documents into whatever page is in front of it, so the set of
+     * pages it will talk to is stated rather than left to Chrome's defaults.
+     *
+     * `tab.url` is readable here because the user's action granted activeTab.
+     * A missing url means Chrome withheld it, which is itself a refusal.
+     */
+    if (!isScannableUrl(tab.url)) {
+      log.debugLazy(() => ['Refusing to inject into a non-web page']);
+      return undefined;
+    }
 
     try {
       /**
@@ -238,6 +294,7 @@ export function App(): ReactNode {
     setBusy(true);
     setStatus({ kind: 'idle' });
     setState({ kind: 'scanning' });
+    setTargetHost(await activeTabHostname());
 
     const injected = await injectScanner();
     if (injected === undefined) {
@@ -371,6 +428,30 @@ export function App(): ReactNode {
     setBusy(true);
     setStatus({ kind: 'idle' });
 
+    /**
+     * SECURITY: fill only the site that was scanned.
+     *
+     * The side panel outlives the tab it was opened over. A user can scan an
+     * application, switch tabs, and click Fill - at which point the profile
+     * values, and the resume, would go to whatever page is now active. That is
+     * not a hypothetical: switching tabs to check something mid-application is
+     * the normal way people use this.
+     *
+     * Comparing hostnames is enough. Under activeTab the extension can only
+     * reach a tab the user has activated it on anyway, so this is not about
+     * stopping an attacker - it is about not sending a person's home address
+     * somewhere they did not mean to.
+     */
+    const currentHost = await activeTabHostname();
+    if (targetHost !== undefined && currentHost !== targetHost) {
+      setBusy(false);
+      setStatus({
+        kind: 'error',
+        message: `You are now on ${currentHost ?? 'another page'}, not ${targetHost}. Rescan before filling.`,
+      });
+      return;
+    }
+
     // Only loaded when the page actually has a resume field. Otherwise we would
     // push the applicant's document into a webpage's context for no reason.
     const needsResume = requested.some((action) => action.action === 'attach_resume');
@@ -463,6 +544,14 @@ export function App(): ReactNode {
     <div className="min-h-screen bg-white p-4 text-sm text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
       <header className="mb-4">
         <h1 className="text-base font-semibold">Job Application Agent</h1>
+        {/* The destination, stated plainly. This panel can hand a resume and a
+            home address to whatever page is in front of it, so the user should
+            never have to guess which site that is. */}
+        {targetHost !== undefined && (
+          <p className="truncate text-xs text-zinc-500" title={targetHost}>
+            Working on <span className="font-medium">{targetHost}</span>
+          </p>
+        )}
         <button
           type="button"
           onClick={() => void chrome.runtime.openOptionsPage()}
