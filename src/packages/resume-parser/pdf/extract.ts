@@ -197,14 +197,58 @@ export async function extractPdf(data: ArrayBuffer): Promise<Result<ExtractionRe
     log.info(`Extracted ${items.length} text runs from ${pageCount} page(s)`);
     return ok({ items, pageCount });
   } catch (error) {
-    return err(
-      new AppError('UNKNOWN', 'This PDF could not be read', {
+    // Say WHY. "This PDF could not be read" was true of every failure and
+    // useful for none of them: a password-protected resume, a truncated
+    // download and a bug in our own worker wiring all produced the same
+    // sentence, so neither the user nor a developer could tell them apart.
+    return err(describePdfFailure(error));
+  }
+}
+
+/**
+ * Turn a PDF.js exception into something the user can act on.
+ *
+ * PDF.js throws typed errors with stable `name` values, which is a far better
+ * signal than matching on message text. Each one below has a genuinely
+ * different remedy, and the point of separating them is that the remedy differs
+ * - not tidiness.
+ *
+ * The underlying message is appended to the unrecognised case. It comes from
+ * PDF.js, describes the FILE STRUCTURE rather than its contents, and contains
+ * no applicant data - so surfacing it costs no privacy and is frequently the
+ * only thing that makes a novel failure diagnosable at all.
+ */
+function describePdfFailure(error: unknown): AppError {
+  const name = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error);
+
+  switch (name) {
+    case 'PasswordException':
+      return new AppError(
+        'SCHEMA_VALIDATION_FAILED',
+        'This PDF is password-protected. Save an unlocked copy and upload that.',
+        { cause: error },
+      );
+
+    case 'InvalidPDFException':
+      return new AppError(
+        'SCHEMA_VALIDATION_FAILED',
+        'This file is not a readable PDF - it may have been truncated or corrupted while downloading. Try exporting it again.',
+        { cause: error },
+      );
+
+    case 'MissingPDFException':
+    case 'UnexpectedResponseException':
+      return new AppError('STORAGE_READ_FAILED', 'The file could not be read from disk.', {
         cause: error,
-        // The filename and contents are the applicant's; only the failure fact
-        // is safe to log.
-        redactable: true,
-      }),
-    );
+      });
+
+    default:
+      // Unrecognised. Name the underlying reason rather than hiding it - this
+      // is the branch a bug in OUR wiring lands in, and the last time one did,
+      // the real reason ("Setting up fake worker failed") was visible only at
+      // debug log level while the user was told nothing.
+      return new AppError('UNKNOWN', `This PDF could not be read: ${message}`, { cause: error });
   }
 }
 

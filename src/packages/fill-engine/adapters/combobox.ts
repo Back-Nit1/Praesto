@@ -103,6 +103,13 @@ export const CustomComboboxAdapter: ControlAdapter = {
      * Only done for a control that actually accepts text.
      */
     const textInput = editableTextInput(element);
+    // Kept so a failed attempt can put the control back exactly as it was.
+    // Without this, typing to filter LEAVES the typed text in the field on
+    // every failure path - which is precisely the "uncommitted text" this
+    // adapter's header promises not to produce, and it is worse than a blank
+    // field: the widget discards it on blur and the form submits nothing while
+    // the user saw a filled-in box.
+    const originalText = textInput?.value ?? '';
     if (textInput !== null) {
       setNativeValue(textInput, wanted);
       dispatchInputEvents(textInput);
@@ -110,6 +117,19 @@ export const CustomComboboxAdapter: ControlAdapter = {
 
     const listbox = await waitForListbox(element);
     if (listbox === null) {
+      /**
+       * No popup - but not necessarily a failure.
+       *
+       * A plain `<input role="combobox">` with an autocomplete that offered no
+       * suggestions is still an input: the text we typed IS the submitted
+       * value, and the executor's read-back will confirm it. Treating this as
+       * a failure would be a regression against the text adapter, which used
+       * to claim these controls and fill them correctly.
+       *
+       * A non-input control (a `<div role="combobox">`) has nowhere for a
+       * value to live, so there it is a genuine failure.
+       */
+      if (textInput !== null) return success(this.name);
       dismiss(element);
       return failure(this.name, 'rejected');
     }
@@ -117,7 +137,12 @@ export const CustomComboboxAdapter: ControlAdapter = {
     const match = findUniqueOption(listbox, wanted);
     if (match === null) {
       // Either nothing matched or several did. Both are the user's call, and
-      // both must leave the control as we found it.
+      // both must leave the control as we found it - including the text we
+      // typed to filter with.
+      if (textInput !== null) {
+        setNativeValue(textInput, originalText);
+        dispatchInputEvents(textInput);
+      }
       dismiss(element);
       return failure(this.name, 'option_not_found');
     }
@@ -338,7 +363,28 @@ function readDisplayedValue(element: HTMLElement): string | undefined {
   const input = editableTextInput(element);
   if (input !== null && input.value.length > 0) return input.value;
 
-  return clean(element.textContent);
+  return clean(displayText(element));
+}
+
+/**
+ * The control's own text, WITHOUT the popup it may contain.
+ *
+ * Some widgets render their option list inside the combobox element. Reading
+ * `textContent` there returns every option label, so a verify comparing
+ * loosely would find the wanted value among 250 country names and report a
+ * fill that never happened - the exact false "verified" this whole change set
+ * exists to eliminate.
+ *
+ * The clone is paid for once per verified field, on a subtree the scan already
+ * capped, and only when the earlier and more explicit signals said nothing.
+ */
+function displayText(element: HTMLElement): string | undefined {
+  const popup = element.querySelector('[role="listbox"], [role="menu"]');
+  if (popup === null) return element.textContent ?? undefined;
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  for (const nested of clone.querySelectorAll('[role="listbox"], [role="menu"]')) nested.remove();
+  return clone.textContent ?? undefined;
 }
 
 // ---------------------------------------------------------------------------

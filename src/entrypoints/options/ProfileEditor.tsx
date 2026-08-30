@@ -284,7 +284,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="profile-grid">
       <Section title="Identity">
         <Field
           label="Legal first name"
@@ -340,7 +340,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           state={stateOf(profile.contact.addressLine2)}
           onChange={(next) => setContactString('addressLine2', next)}
         />
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field
             label="City"
             value={text(profile.contact.city)}
@@ -586,7 +586,7 @@ function EducationEntry({
         state={stateOf(entry.institution)}
         onChange={(next) => set('institution', userValue(next))}
       />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
           label="Degree"
           value={text(entry.degree)}
@@ -601,7 +601,7 @@ function EducationEntry({
           onChange={(next) => set('fieldOfStudy', userValue(next))}
         />
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <DateField
           label="Started"
           value={entry.startDate}
@@ -649,7 +649,7 @@ function EmploymentEntry({
       onRemove={onRemove}
       removeLabel="Remove this job"
     >
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
           label="Employer"
           value={text(entry.company)}
@@ -669,7 +669,7 @@ function EmploymentEntry({
         state={stateOf(entry.location)}
         onChange={(next) => set('location', userValue(next))}
       />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <DateField
           label="Started"
           value={entry.startDate}
@@ -688,7 +688,7 @@ function EmploymentEntry({
         applicant knows and what forms ask. It also drives which job is offered
         as "current employer", which is a stronger signal than any date parse.
       */}
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] transition hover:border-[--app-border-strong]">
         <input
           type="checkbox"
           checked={current}
@@ -696,7 +696,7 @@ function EmploymentEntry({
             set('currentlyEmployed', userValue(event.target.checked))
           }
         />
-        I currently work here
+        <span className="font-medium">I currently work here</span>
       </label>
 
       <TextAreaField
@@ -730,7 +730,7 @@ function ProjectEntry({
       onRemove={onRemove}
       removeLabel="Remove this project"
     >
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
           label="Project name"
           value={text(entry.name)}
@@ -828,17 +828,19 @@ function TextAreaField({
 }): ReactNode {
   return (
     <label className="block">
-      <span className="mb-1 flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+      <span className="mb-1 flex items-center gap-2 text-sm text-[--app-text]">
         <StateBadge state={state} />
-        {label}
+        <span className="font-medium">{label}</span>
       </span>
       <textarea
         value={value}
         rows={3}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+        className="w-full resize-y rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
       />
-      {hint !== undefined && <span className="mt-1 block text-xs text-zinc-500">{hint}</span>}
+      {hint !== undefined && (
+        <span className="mt-1.5 block text-[11px] leading-relaxed text-[--app-muted]">{hint}</span>
+      )}
     </label>
   );
 }
@@ -865,26 +867,28 @@ function EntryCard({
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <div className="rounded-2xl border border-[--app-border] bg-[--app-panel-soft] p-3.5 transition hover:border-[--app-border-strong]">
+      <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
-          className="flex min-w-0 items-center gap-2 text-sm font-medium"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm font-semibold text-[--app-text]"
           aria-expanded={open}
         >
-          <span aria-hidden="true">{open ? '−' : '+'}</span>
+          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[--app-accent-soft] text-xs text-[--app-accent]" aria-hidden="true">
+            {open ? '−' : '+'}
+          </span>
           <span className="truncate">{title}</span>
         </button>
         <button
           type="button"
           onClick={onRemove}
-          className="shrink-0 text-xs text-red-600 hover:underline"
+          className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-[--app-danger] transition hover:bg-red-500/8"
         >
           {removeLabel}
         </button>
       </div>
-      {open && <div className="space-y-2">{children}</div>}
+      {open && <div className="mt-4 space-y-3.5 border-t border-[--app-border] pt-4">{children}</div>}
     </div>
   );
 }
@@ -894,9 +898,10 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }): 
     <button
       type="button"
       onClick={onClick}
-      className="rounded border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-600 hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-600 dark:text-zinc-400"
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[--app-border-strong] bg-[--app-panel-soft] px-3 py-2.5 text-sm font-semibold text-[--app-accent] transition hover:border-[--app-accent] hover:bg-[--app-accent-soft]"
     >
-      + {label}
+      <span className="text-base leading-none" aria-hidden="true">+</span>
+      {label}
     </button>
   );
 }
@@ -927,21 +932,21 @@ function TriStateQuestion({
   ];
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded border border-zinc-200 px-3 py-2 dark:border-zinc-700">
-      <span className="flex items-center gap-2 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5">
+      <span className="flex items-center gap-2 text-sm font-medium text-[--app-text]">
         <StateBadge state={state} />
         {label}
       </span>
-      <div className="flex gap-1">
+      <div className="flex rounded-lg border border-[--app-border] bg-[--app-panel] p-0.5">
         {options.map((option) => (
           <button
             key={String(option.value)}
             type="button"
             onClick={() => onChange(option.value)}
-            className={`rounded px-2 py-1 text-xs ${
+            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
               value === option.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200'
+                ? 'bg-[--app-accent] text-white shadow-sm'
+                : 'text-[--app-muted] hover:bg-[--app-panel-soft] hover:text-[--app-text]'
             }`}
             aria-pressed={value === option.value}
           >

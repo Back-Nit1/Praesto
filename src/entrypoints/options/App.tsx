@@ -8,7 +8,7 @@
  *               metadata during an actual application.
  */
 import { useState, type ReactNode } from 'react';
-import { Button, StatusLine } from '@/components/ui';
+import { BrandMark, Button, StatusLine } from '@/components/ui';
 import { useProfile } from '@/hooks/use-profile';
 import { ProfileEditor } from './ProfileEditor';
 import { MappingPlayground } from './MappingPlayground';
@@ -22,6 +22,33 @@ const TAB_LABELS: Record<Tab, string> = {
   resume: 'Resume',
   learned: 'Learned rules',
   playground: 'Mapping playground',
+};
+
+const TAB_META: Record<Tab, { kicker: string; title: string; description: string }> = {
+  profile: {
+    kicker: 'Profile vault',
+    title: 'Your application identity',
+    description:
+      'The verified facts the agent can use with confidence. Add them once, then keep your attention for the questions that actually need it.',
+  },
+  resume: {
+    kicker: 'Document library',
+    title: 'Resumes, ready when needed',
+    description:
+      'Store the version you want attached and review anything the agent extracts before it reaches your profile.',
+  },
+  learned: {
+    kicker: 'Personal memory',
+    title: 'What the agent learned from you',
+    description:
+      'Every correction becomes a transparent rule. You stay in control of what it remembers and where that rule applies.',
+  },
+  playground: {
+    kicker: 'Mapping lab',
+    title: 'See how a field is understood',
+    description:
+      'A technical workspace for testing labels, form controls and confidence without touching a real application.',
+  },
 };
 
 export function App(): ReactNode {
@@ -103,64 +130,167 @@ export function App(): ReactNode {
   }
 
   if (loading) {
-    return <div className="p-8 text-sm text-zinc-500">Loading your profile...</div>;
+    return (
+      <div className="options-shell grid min-h-screen place-items-center">
+        <div className="text-center">
+          <div className="scan-orbit" aria-hidden="true" />
+          <p className="text-sm text-[--app-muted]">Opening your private workspace…</p>
+        </div>
+      </div>
+    );
   }
 
+  const active = TAB_META[tab];
+
   return (
-    <div className="min-h-screen bg-white p-8 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Personal Job Application Agent</h1>
-          <p className="text-sm text-zinc-500">
-            Your verified profile. Everything here stays on this computer.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={handleExport}>
-            Export JSON
-          </Button>
-          <label className="cursor-pointer rounded bg-zinc-200 px-3 py-1.5 text-sm font-medium hover:bg-zinc-300 dark:bg-zinc-700">
-            Import JSON
-            <input
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file !== undefined) void handleImport(file);
-              }}
-            />
-          </label>
-          <Button onClick={handleSave} disabled={!dirty}>
-            {dirty ? 'Save changes' : 'Saved'}
-          </Button>
-        </div>
-      </header>
+    <div className="options-shell">
+      <div className="options-layout">
+        <aside className="options-sidebar">
+          <div className="mb-8 flex items-center gap-3 px-1">
+            <BrandMark />
+            <div>
+              <div className="text-[15px] font-bold tracking-[-0.025em] text-[--app-text]">
+                Application Agent
+              </div>
+              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--app-muted]">
+                Your private operator
+              </div>
+            </div>
+          </div>
 
-      <StatusLine status={status} />
-      {error !== undefined && <StatusLine status={{ kind: 'error', message: error }} />}
+          <nav className="space-y-1" aria-label="Workspace">
+            {(['profile', 'resume', 'learned', 'playground'] as const).map((candidate) => {
+              const selected = tab === candidate;
+              return (
+                <button
+                  key={candidate}
+                  type="button"
+                  onClick={() => setTab(candidate)}
+                  className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                    selected
+                      ? 'bg-[--app-accent-soft] font-semibold text-[--app-accent] shadow-[inset_0_0_0_1px_var(--app-border)]'
+                      : 'text-[--app-muted] hover:bg-[--app-panel-soft] hover:text-[--app-text]'
+                  }`}
+                  aria-current={selected ? 'page' : undefined}
+                >
+                  <NavIcon tab={candidate} active={selected} />
+                  <span>{TAB_LABELS[candidate]}</span>
+                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[--app-accent]" />}
+                </button>
+              );
+            })}
+          </nav>
 
-      <nav className="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-700">
-        {(['profile', 'resume', 'learned', 'playground'] as const).map((candidate) => (
-          <button
-            key={candidate}
-            type="button"
-            onClick={() => setTab(candidate)}
-            className={`px-3 py-2 text-sm ${
-              tab === candidate
-                ? 'border-b-2 border-blue-600 font-medium'
-                : 'text-zinc-500 hover:text-zinc-800'
-            }`}
-          >
-            {TAB_LABELS[candidate]}
-          </button>
-        ))}
-      </nav>
+          <div className="mt-auto rounded-2xl border border-[--app-border] bg-[--app-panel-soft] p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[--app-text]">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-[--app-success]">
+                <ShieldIcon />
+              </span>
+              Private by design
+            </div>
+            <p className="text-[11px] leading-relaxed text-[--app-muted]">
+              Your profile and resumes stay in this browser. Nothing is sent to a cloud service.
+            </p>
+          </div>
+        </aside>
 
-      {tab === 'profile' && profile !== undefined && <ProfileEditor profile={profile} edit={edit} />}
-      {tab === 'resume' && <ResumeImport />}
-      {tab === 'learned' && <LearnedRules />}
-      {tab === 'playground' && <MappingPlayground profile={profile} />}
+        <main className="options-main">
+          <div className="options-workspace">
+            <header className="workspace-topbar">
+              <div>
+                <div className="workspace-kicker">{active.kicker}</div>
+                <h1 className="workspace-title">{active.title}</h1>
+                <p className="workspace-subtitle">{active.description}</p>
+              </div>
+
+              <div className="workspace-actions">
+                <Button variant="ghost" onClick={handleExport}>
+                  <DownloadIcon /> Export
+                </Button>
+                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3.5 py-2 text-sm font-semibold text-[--app-text] transition hover:border-[--app-border-strong] hover:bg-[--app-panel]">
+                  <UploadIcon /> Import
+                  <input
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file !== undefined) void handleImport(file);
+                    }}
+                  />
+                </label>
+                <Button onClick={handleSave} disabled={!dirty}>
+                  {dirty ? (
+                    <>
+                      <SaveIcon /> Save changes
+                    </>
+                  ) : (
+                    <>
+                      <CheckIcon /> Saved
+                    </>
+                  )}
+                </Button>
+              </div>
+            </header>
+
+            <StatusLine status={status} />
+            {error !== undefined && <StatusLine status={{ kind: 'error', message: error }} />}
+
+            <div className="mt-6">
+              {tab === 'profile' && profile !== undefined && (
+                <ProfileEditor profile={profile} edit={edit} />
+              )}
+              {tab === 'resume' && <ResumeImport />}
+              {tab === 'learned' && <LearnedRules />}
+              {tab === 'playground' && <MappingPlayground profile={profile} />}
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
+  );
+}
+
+function NavIcon({ tab, active }: { tab: Tab; active: boolean }): ReactNode {
+  const paths: Record<Tab, ReactNode> = {
+    profile: <><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" /></>,
+    resume: <><path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" /></>,
+    learned: <><path d="M12 3.5a6 6 0 0 0-3.8 10.6c.8.7 1.3 1.5 1.3 2.4h5c0-.9.5-1.7 1.3-2.4A6 6 0 0 0 12 3.5Z" /><path d="M9.7 20h4.6M10 17h4" /></>,
+    playground: <><path d="m8 3 1.2 3.2L12.5 7.5 9.2 8.8 8 12 6.8 8.8 3.5 7.5l3.3-1.3z" /><path d="m16.5 11 1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z" /></>,
+  };
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={active ? 1.9 : 1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {paths[tab]}
+    </svg>
+  );
+}
+
+const ShieldIcon = (): ReactNode => (
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M12 3 5.5 5.7v5.1c0 4.2 2.6 7.8 6.5 9.7 3.9-1.9 6.5-5.5 6.5-9.7V5.7z" />
+    <path d="m9.2 12 1.8 1.8 3.9-4" />
+  </svg>
+);
+
+const DownloadIcon = (): ReactNode => <ActionIcon path="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" />;
+const UploadIcon = (): ReactNode => <ActionIcon path="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" />;
+const SaveIcon = (): ReactNode => <ActionIcon path="M5 4h12l2 2v14H5zM8 4v5h8V4M8 20v-7h8v7" />;
+const CheckIcon = (): ReactNode => <ActionIcon path="m6 12 4 4 8-9" />;
+
+function ActionIcon({ path }: { path: string }): ReactNode {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={path} />
+    </svg>
   );
 }

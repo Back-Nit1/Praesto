@@ -204,19 +204,22 @@ export function ResumeImport(): ReactNode {
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <section>
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Your resume
-        </h2>
-        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
-          Upload a PDF. It is stored on this computer, in this browser, and is never sent anywhere.
-          The extension reads it once to fill in your profile, and attaches it to the resume field on
-          applications so you do not have to find the file every time.
-        </p>
+    <div className="max-w-4xl space-y-6">
+      <section className="surface-card relative overflow-hidden p-6 sm:p-8">
+        <div className="relative z-10 max-w-2xl">
+          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[--app-accent-soft] text-[--app-accent]">
+            <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold tracking-[-0.025em] text-[--app-text]">Bring your resume into the vault</h2>
+          <p className="mb-5 mt-2 text-sm leading-relaxed text-[--app-muted]">
+            Upload a PDF once. It stays in this browser, helps build your profile, and is ready to attach when an application asks for it.
+          </p>
 
-        <label className="inline-block cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-          {busy ? 'Working...' : 'Upload a PDF resume'}
+          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[--app-accent] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition hover:-translate-y-px hover:bg-[--app-accent-strong]">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" /></svg>
+          {busy ? 'Reading your resume…' : 'Upload PDF resume'}
           <input
             type="file"
             accept="application/pdf,.pdf"
@@ -230,36 +233,38 @@ export function ResumeImport(): ReactNode {
             }}
           />
         </label>
+        </div>
+        <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full border border-indigo-500/10 bg-indigo-500/5 shadow-[0_0_0_28px_rgba(99,81,220,0.025),0_0_0_58px_rgba(99,81,220,0.018)]" />
       </section>
 
       <StatusLine status={status} />
 
       {stored.length > 0 && (
-        <section>
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-            Stored ({stored.length})
+        <section className="surface-card p-5">
+          <h3 className="mb-3 text-sm font-semibold text-[--app-text]">
+            Saved resumes <span className="ml-1 text-[--app-muted]">{stored.length}</span>
           </h3>
-          <ul className="space-y-1">
+          <ul className="space-y-2">
             {stored.map((document) => (
               <li
                 key={document.id}
-                className="flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                className="flex items-center justify-between rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3.5 py-3 text-sm"
               >
                 <span className="min-w-0 flex-1 truncate">
                   {document.fileName}
-                  <span className="ml-2 text-xs text-zinc-500">
+                  <span className="ml-2 text-xs text-[--app-muted]">
                     {Math.round(document.sizeBytes / 1024)} KB ·{' '}
                     {new Date(document.addedAt).toLocaleDateString()}
                   </span>
                 </span>
                 <div className="flex shrink-0 items-center gap-3">
                   {defaultId === document.id ? (
-                    <span className="text-xs font-medium text-green-600">Attached to applications</span>
+                    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-[--app-success]">Default</span>
                   ) : (
                     <button
                       type="button"
                       onClick={() => void handleSetDefault(document.id)}
-                      className="text-xs text-blue-600 hover:underline"
+                      className="text-xs font-semibold text-[--app-accent] hover:underline"
                     >
                       Use this one
                     </button>
@@ -267,7 +272,7 @@ export function ResumeImport(): ReactNode {
                   <button
                     type="button"
                     onClick={() => void handleDelete(document.id)}
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs font-semibold text-[--app-danger] hover:underline"
                   >
                     Delete
                   </button>
@@ -329,17 +334,18 @@ function ReviewExtraction({
   const entries = Object.entries(parsed.scalars);
 
   return (
-    <section className="space-y-3 rounded border border-blue-200 bg-blue-50/40 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+    <section className="surface-card space-y-4 border-indigo-500/20 p-5">
       <div>
-        <h3 className="text-sm font-semibold">Check what we read</h3>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <h3 className="text-base font-semibold text-[--app-text]">Check what we read</h3>
+        <p className="mt-1 text-sm text-[--app-muted]">
           Nothing is saved until you accept it. Uncheck anything that is wrong — a blank field is
           always better than a wrong one.
         </p>
       </div>
 
+      <div className="overflow-x-auto rounded-xl border border-[--app-border]">
       <table className="w-full text-left text-sm">
-        <thead className="text-xs uppercase tracking-wide text-zinc-500">
+        <thead className="bg-[--app-panel-soft] text-[10px] uppercase tracking-[0.12em] text-[--app-muted]">
           <tr>
             <th className="w-8 py-1" />
             <th className="py-1">Field</th>
@@ -351,7 +357,7 @@ function ReviewExtraction({
           {entries.map(([path, value]) => {
             const confidence = bestConfidence(value);
             return (
-              <tr key={path} className="border-t border-blue-200/60 dark:border-blue-900/60">
+              <tr key={path} className="border-t border-[--app-border]">
                 <td className="py-2">
                   <input
                     type="checkbox"
@@ -370,7 +376,7 @@ function ReviewExtraction({
                   </span>
                 </td>
                 <td className="py-2 pr-3 font-medium">{renderValue(value.value)}</td>
-                <td className="py-2 text-xs text-zinc-500">
+                <td className="py-2 text-xs text-[--app-muted]">
                   {value.evidence[0]?.originalText ?? '—'}
                 </td>
               </tr>
@@ -378,6 +384,7 @@ function ReviewExtraction({
           })}
         </tbody>
       </table>
+      </div>
 
       {(parsed.education.length > 0 ||
         parsed.employment.length > 0 ||

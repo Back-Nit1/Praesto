@@ -35,7 +35,7 @@
  * the form under any circumstances.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Button, StateBadge, StatusLine, type FieldState } from '@/components/ui';
+import { BrandMark, Button, StateBadge, StatusLine, type FieldState } from '@/components/ui';
 import type { ResolvedFieldAction } from '@shared/messages';
 import {
   describeFillFailure,
@@ -570,38 +570,73 @@ export function App(): ReactNode {
   }
 
   return (
-    <div className="min-h-screen bg-white p-4 text-sm text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
-      <header className="mb-4">
-        <h1 className="text-base font-semibold">Job Application Agent</h1>
+    <div className="panel-shell text-sm">
+      <header className="panel-header">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BrandMark small />
+          <div className="min-w-0">
+            <h1 className="panel-product-name">Application Agent</h1>
         {/* The destination, stated plainly. This panel can hand a resume and a
             home address to whatever page is in front of it, so the user should
             never have to guess which site that is. */}
-        {targetHost !== undefined && (
-          <p className="truncate text-xs text-zinc-500" title={targetHost}>
-            Working on <span className="font-medium">{targetHost}</span>
-          </p>
-        )}
+            {targetHost !== undefined ? (
+              <p className="panel-host truncate" title={targetHost}>
+                <span className="truncate">{targetHost}</span>
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[10px] text-[--app-muted]">Private application copilot</p>
+            )}
+          </div>
+        </div>
         <button
           type="button"
           onClick={() => void chrome.runtime.openOptionsPage()}
-          className="text-xs text-blue-600 hover:underline"
+          className="panel-icon-button"
+          aria-label="Edit your profile"
+          title="Edit your profile"
         >
-          Edit your profile
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" />
+          </svg>
         </button>
       </header>
 
       {state.kind === 'idle' && (
-        <div className="space-y-3">
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Open a job application, then scan it. Nothing is filled until you ask.
-          </p>
-          <Button onClick={() => void handleScan()} disabled={busy}>
-            Scan this page
-          </Button>
+        <div className="panel-hero">
+          <div className="panel-hero-icon">
+            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3" /><circle cx="12" cy="12" r="3.5" /><path d="m14.7 14.7 2.6 2.6" />
+            </svg>
+          </div>
+          <div className="relative z-10">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-[--app-accent]">
+              Ready when you are
+            </div>
+            <h2 className="text-xl font-semibold tracking-[-0.035em] text-[--app-text]">
+              Turn this form into a review list.
+            </h2>
+            <p className="mb-5 mt-2 text-xs leading-relaxed text-[--app-muted]">
+              We’ll read the visible questions, prepare only confident answers, and leave everything else for you.
+            </p>
+            <Button className="w-full" onClick={() => void handleScan()} disabled={busy}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg>
+              Scan this page
+            </Button>
+            <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-[--app-muted]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[--app-teal]" />
+              Nothing is filled without your click
+            </div>
+          </div>
         </div>
       )}
 
-      {state.kind === 'scanning' && <p className="text-zinc-500">Reading the form...</p>}
+      {state.kind === 'scanning' && (
+        <div className="panel-card px-5 py-7 text-center">
+          <div className="scan-orbit" aria-hidden="true" />
+          <p className="font-semibold text-[--app-text]">Reading the form…</p>
+          <p className="mt-1 text-[11px] text-[--app-muted]">Finding questions and matching verified answers</p>
+        </div>
+      )}
 
       {state.kind === 'error' && (
         <ScanError
@@ -616,9 +651,9 @@ export function App(): ReactNode {
       <StatusLine status={status} />
 
       {pageChanged && state.kind === 'scanned' && (
-        <div className="my-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/40">
-          <p className="mb-1">This form changed - it may be showing questions we have not read.</p>
-          <Button variant="secondary" onClick={() => void handleScan()} disabled={busy}>
+        <div className="my-3 rounded-xl border border-amber-500/20 bg-amber-500/8 p-3 text-xs text-[--app-warning]">
+          <p className="mb-2 font-medium">This form changed. There may be new questions.</p>
+          <Button variant="secondary" className="w-full" onClick={() => void handleScan()} disabled={busy}>
             Rescan
           </Button>
         </div>

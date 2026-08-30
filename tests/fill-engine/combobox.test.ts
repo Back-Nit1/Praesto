@@ -124,6 +124,50 @@ describe('CustomComboboxAdapter', () => {
     expect(await CustomComboboxAdapter.verify(contextFor(element), 'Anything')).toBe(false);
   });
 
+  it('still fills a text combobox whose autocomplete offers nothing', async () => {
+    // A plain <input role="combobox"> IS an input: if no suggestion list
+    // appears, the typed text is the submitted value. Failing here would be a
+    // regression against the text adapter, which used to claim these.
+    document.body.innerHTML = '<input role="combobox" type="text" />';
+    const element = document.body.firstElementChild as HTMLInputElement;
+
+    const result = await CustomComboboxAdapter.fill(contextFor(element), 'Remote, US');
+    expect(result.ok).toBe(true);
+    expect(element.value).toBe('Remote, US');
+    expect(await CustomComboboxAdapter.verify(contextFor(element), 'Remote, US')).toBe(true);
+  });
+
+  it('does not leave the text it typed to filter with in a field it could not fill', async () => {
+    // The failure this guards against is worse than a blank field: the widget
+    // discards uncommitted text on blur, so the user sees a filled-in box and
+    // the form submits nothing.
+    const element = mountCombobox(['Canada', 'Mexico']);
+    const input = document.createElement('input');
+    input.type = 'text';
+    element.appendChild(input);
+
+    const result = await CustomComboboxAdapter.fill(contextFor(element), 'Norway');
+    expect(result.ok).toBe(false);
+    expect(input.value).toBe('');
+  });
+
+  it('does not read an open option list as the selected value', async () => {
+    // A widget that renders its list INSIDE the combobox would otherwise make
+    // `verify` find "United States" among 250 country names and report a fill
+    // that never happened.
+    document.body.innerHTML = `
+      <div role="combobox">
+        <span>Select...</span>
+        <div role="listbox">
+          <div role="option">Canada</div>
+          <div role="option">United States</div>
+        </div>
+      </div>`;
+    const element = document.body.firstElementChild as HTMLElement;
+
+    expect(await CustomComboboxAdapter.verify(contextFor(element), 'United States')).toBe(false);
+  });
+
   it('prefers the option value the resolver already matched', async () => {
     const element = mountCombobox(['Bachelor of Science', 'Bachelor of Arts']);
 

@@ -78,6 +78,22 @@ describe('extractPdf', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('names the reason a PDF could not be read', async () => {
+    const notAPdf = new TextEncoder().encode('this is not a PDF at all');
+    const result = await extractPdf(notAPdf.buffer as ArrayBuffer);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    // The message must distinguish this from every other failure. A single
+    // "This PDF could not be read" covered a password-protected file, a
+    // truncated download, and a bug in our own worker wiring - so nobody,
+    // developer included, could tell which had happened.
+    expect(result.error.message).not.toBe('This PDF could not be read');
+    expect(result.error.message.toLowerCase()).toContain('pdf');
+    // A malformed file is the user's file being wrong, not our code failing.
+    expect(result.error.code).toBe('SCHEMA_VALIDATION_FAILED');
+  });
+
   it('recognises a document with no usable text layer', async () => {
     // What a scanned resume looks like to us: essentially no extractable text.
     // Detecting it is what lets the UI say "this looks like a scan" instead of

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Resume parser harness</title>
+    <style>
+      body { font: 14px/1.5 ui-monospace, monospace; margin: 2rem; max-width: 60rem; }
+      pre { background: #f4f4f5; padding: 1rem; border-radius: .4rem; white-space: pre-wrap; }
+      .ok { color: #15803d; } .bad { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <h1>Resume parser harness</h1>
+    <p>
+      Runs the REAL <code>parseResume</code> pipeline in a real browser, which is
+      the environment the extension actually fails in. Node tests pass here and
+      still miss browser-only bundling and worker problems.
+    </p>
+    <p><input type="file" id="file" accept="application/pdf" /> or <button id="fixture">use the bundled fixture</button></p>
+    <pre id="out">ready</pre>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
