@@ -20,7 +20,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "check": "npm run compile && npm run test"
+    "check": "npm run compile && npm run test",
+    "audit:ship": "npm audit --omit=dev --audit-level=high",
+    "verify": "npm run compile && npm run test && npm run audit:ship"
   },
   "dependencies": {
     "pdfjs-dist": "^6.3.289",
