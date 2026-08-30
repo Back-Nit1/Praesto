@@ -151,29 +151,29 @@ what it knows.
    partial rather than wrong. DOCX and OCR are not implemented — a scanned PDF
    is detected and reported as such, and the file is still stored for
    attachment.
-2. **Corrections apply to scalar profile fields only.** The side panel's picker
-   lists the ~30 scalar paths. Correcting a field to a specific education or
-   employment entry (`education[0].gpa`) needs an entry picker the UI does not
-   have yet.
-3. **Custom dropdowns are not driven.** A `[role="combobox"]` is detected and
-   described, but no adapter can open one and pick an option, so Workday-style
-   controls are reported and left alone.
-4. **One profile.** The schema carries an `id` and a `label` for multiple
+2. **One profile.** The schema carries an `id` and a `label` for multiple
    profiles and resume variants; the UI exposes one.
-5. **Repeated entities are not editable in the UI.** Education, employment and
-   projects are fully modelled, mappable and resolvable, but the editor has no
-   screens for them yet, so they can only be populated via JSON import.
-6. **No iframe support.** Fields inside an iframe are not scanned. The
-   descriptor already carries `inIframe` and the architecture keeps per-frame
-   scanning possible (spec section 17), but the coordinator is not built.
-7. **Non-NANP phone numbers get no national format.** International numbers
+3. **Which entry an unqualified question means is a heuristic.** "School" with
+   no section heading resolves to the most recent education, "Employer" to the
+   current job (`profile/selectors.ts`). A form asking about a *second* school
+   without labelling it as such will be answered from the first, and the user
+   has to correct it. A form that labels its blocks - which most do - is
+   resolved correctly by the section heading.
+4. **A combobox is driven blind.** The adapter opens the control, waits for the
+   list and clicks a unique match. It cannot read options that are fetched from
+   a server only after several keystrokes, and it refuses rather than guessing
+   when more than one option matches.
+5. **Non-NANP phone numbers get no national format.** International numbers
    store a correct E.164 form and digit string; a locale-idiomatic national
    format would need libphonenumber, whose ~145 kB is a real cost on the
    low-memory machines this extension targets. The resolver refuses the formats
    it cannot produce rather than emitting a wrong one.
-8. **Dynamic rescans are detected but not acted on.** The `MutationObserver`
-   fires and logs; wiring it to an incremental rescan is Phase 4 cleanup.
-9. **English-only aliases.**
+6. **A revealed question needs a click.** The `MutationObserver` tells the side
+   panel the form changed and the panel offers a rescan; it never rescans or
+   fills on its own. That is deliberate - a question the form reveals in
+   response to an answer must not be answered without the user seeing it - but
+   it does mean an extra click on a conditional form.
+7. **English-only aliases.**
 
 ---
 
@@ -212,11 +212,11 @@ After that, in order:
 1. **Persist audit records to IndexedDB.** They are the input to every metric in
    spec section 26, and without them "incorrect-fill rate" — the metric the
    spec calls most important — cannot be measured at all.
-2. **Wire the MutationObserver to an incremental rescan**, so conditionally
-   revealed questions are picked up without a manual rescan.
-3. **Resume ingestion (Phase 2).**
-4. **An ARIA combobox adapter**, which is the prerequisite for Workday and
-   already the most common reason a detected field is left alone.
+2. **Incremental rescan of a revealed subtree**, so a conditional question
+   appears in the panel without a full rescan of the page. The signal is
+   already wired; only the incremental path is missing.
+3. **ATS-specific rules for Greenhouse, Lever and Workday**, added only where
+   the generic engine genuinely cannot reach (spec section 18).
 
 ---
 

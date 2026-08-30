@@ -846,9 +846,10 @@ function TextAreaField({
 /**
  * One entry in a repeated list, with its own removal control.
  *
- * Collapsible, and collapsed by default once there are several: a profile with
- * four jobs and three schools is otherwise a very long page to scroll past to
- * reach the work-authorization questions.
+ * Collapsible, and titled by the school or employer rather than by an index,
+ * because a profile with four jobs and three schools is otherwise a long page
+ * to scroll past to reach the work-authorization questions. It opens expanded:
+ * a newly added entry the user has to click to fill in would be a puzzle.
  */
 function EntryCard({
   title,
