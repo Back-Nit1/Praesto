@@ -71,6 +71,47 @@ const MAX_RESUME_BYTES = 10 * 1024 * 1024;
  */
 const ACCEPTED_MIME_TYPES = new Set(['application/pdf']);
 
+/**
+ * SECURITY: `%PDF-`, the first five bytes of every PDF.
+ *
+ * `file.type` is derived by the browser from the file's EXTENSION, not its
+ * content, so it is a claim rather than a fact - renaming `payload.exe` to
+ * `resume.pdf` produces `application/pdf`. Checking the magic bytes is what
+ * makes "we only store PDFs" true, and it matters because these bytes are
+ * later attached to an employer's form and fed to a PDF parser.
+ */
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d] as const;
+
+/**
+ * Longest filename kept.
+ *
+ * The name is shown in the UI and reused as the attached file's name on a
+ * third-party form. Path separators and control characters are stripped for
+ * the same reason: nothing downstream should have to defend against them.
+ */
+const MAX_FILE_NAME_CHARS = 128;
+
+/** Strip a filename down to something safe to display and to re-attach. */
+function sanitizeFileName(raw: string): string {
+  const cleaned = raw
+    // eslint-disable-next-line no-control-regex -- removing control chars is the point
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\\/]/g, '_')
+    .trim()
+    .slice(0, MAX_FILE_NAME_CHARS);
+
+  if (cleaned.length === 0) return 'resume.pdf';
+  return cleaned.toLowerCase().endsWith('.pdf') ? cleaned : `${cleaned}.pdf`;
+}
+
+/** Do these bytes actually begin a PDF? */
+function looksLikePdf(bytes: ArrayBuffer): boolean {
+  if (bytes.byteLength < PDF_MAGIC.length) return false;
+  // A 5-byte view, not a copy of the whole file.
+  const head = new Uint8Array(bytes, 0, PDF_MAGIC.length);
+  return PDF_MAGIC.every((byte, index) => head[index] === byte);
+}
+
 export class ResumeDocumentStore {
   private readonly collection = new IndexedDbCollection<ResumeDocument>(STORES.resumes);
 
@@ -97,10 +138,21 @@ export class ResumeDocumentStore {
       );
     }
 
+    // Read AFTER the size check, so an oversized file is refused before it is
+    // pulled into memory rather than after.
     const bytes = await file.arrayBuffer();
+
+    // SECURITY: content check. `file.type` above is a claim about the
+    // extension; this is the fact.
+    if (!looksLikePdf(bytes)) {
+      return err(
+        new AppError('SCHEMA_VALIDATION_FAILED', 'That file is not a PDF, whatever it is named'),
+      );
+    }
+
     const document: ResumeDocument = {
       id: newId('resume'),
-      fileName: file.name,
+      fileName: sanitizeFileName(file.name),
       mimeType: file.type,
       bytes,
       sizeBytes: file.size,

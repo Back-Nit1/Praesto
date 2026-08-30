@@ -41,6 +41,25 @@ export interface ExtractionResult {
  */
 const MIN_TEXT_CHARS = 100;
 
+/**
+ * SECURITY / MEMORY: hard caps on what one document may cost us.
+ *
+ * A PDF is an untrusted, attacker-authorable format being parsed by a large
+ * library INSIDE AN EXTENSION PAGE - the most privileged JavaScript context
+ * this codebase has. The file normally comes from the user's own disk, but
+ * "the user downloaded a resume template from a job board" is an ordinary
+ * thing that happens, so the parse is treated as hostile input.
+ *
+ * These caps bound the cheap attack, which is not code execution but resource
+ * exhaustion: a PDF declaring 50,000 pages, or one page emitting millions of
+ * one-character text runs, exhausts memory on a 4 GB machine long before it
+ * finishes. A resume is one to three pages; 50 is generous for a CV with a
+ * publication list, and 200,000 text runs is ~100x what a dense academic CV
+ * produces.
+ */
+const MAX_PAGES = 50;
+const MAX_TEXT_ITEMS = 200_000;
+
 /** True when a PDF font name indicates a bold weight. */
 function isBoldFont(fontName: string | undefined): boolean {
   if (fontName === undefined) return false;
@@ -109,7 +128,23 @@ export async function extractPdf(data: ArrayBuffer): Promise<Result<ExtractionRe
       // extraction does not need font programs - only glyph positions.
       disableFontFace: true,
       useSystemFonts: false,
-    }).promise;
+      /**
+       * SECURITY: PDF.js compiles some font programs with `new Function` when
+       * it is allowed to. Our extension CSP is `script-src 'self'` with no
+       * `unsafe-eval`, so those calls THROW and PDF.js falls back - but only
+       * because it happens to catch them. Saying `false` here makes the
+       * guarantee explicit and deterministic rather than dependent on a
+       * library's internal error handling, and it removes a code path that
+       * turns document content into executable code.
+       *
+       * The cast is needed because `isEvalSupported` is a real, documented
+       * runtime option that pdfjs-dist v6 omits from its published
+       * `DocumentInitParameters` type. Passing an unknown key is harmless - the
+       * library reads what it recognises - and the alternative is relying on
+       * an exception being swallowed.
+       */
+      isEvalSupported: false,
+    } as Parameters<typeof pdfjs.getDocument>[0]).promise;
 
     const items: ResumeTextItem[] = [];
 
@@ -117,18 +152,41 @@ export async function extractPdf(data: ArrayBuffer): Promise<Result<ExtractionRe
     // memory is roughly page size times concurrency, and on a 2 GB device the
     // budget drops that to 1 - which is the difference between parsing a resume
     // and having the tab killed.
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += budget.pdfPageConcurrency) {
+    //
+    // SECURITY: a document may DECLARE any page count. Read at most MAX_PAGES
+    // of them, whatever it claims.
+    const pageCount = Math.min(document.numPages, MAX_PAGES);
+    if (document.numPages > MAX_PAGES) {
+      log.warn(`PDF declares ${document.numPages} pages; reading the first ${MAX_PAGES}`);
+    }
+
+    outer: for (
+      let pageNumber = 1;
+      pageNumber <= pageCount;
+      pageNumber += budget.pdfPageConcurrency
+    ) {
       const batch: number[] = [];
       for (
         let offset = 0;
-        offset < budget.pdfPageConcurrency && pageNumber + offset <= document.numPages;
+        offset < budget.pdfPageConcurrency && pageNumber + offset <= pageCount;
         offset++
       ) {
         batch.push(pageNumber + offset);
       }
 
       const pages = await Promise.all(batch.map((n) => extractPage(document, n)));
-      for (const pageItems of pages) items.push(...pageItems);
+      for (const pageItems of pages) {
+        // Appended one at a time rather than with `push(...pageItems)`: a page
+        // emitting a million runs would blow the argument limit outright, and
+        // the cap has to be checked as we go rather than after the fact.
+        for (const item of pageItems) {
+          if (items.length >= MAX_TEXT_ITEMS) {
+            log.warn('PDF text-run cap reached; the rest of the document is ignored');
+            break outer;
+          }
+          items.push(item);
+        }
+      }
     }
 
     // Release the document's internal buffers rather than waiting for GC. A
@@ -136,8 +194,8 @@ export async function extractPdf(data: ArrayBuffer): Promise<Result<ExtractionRe
     // at a review screen for a while.
     await document.cleanup();
 
-    log.info(`Extracted ${items.length} text runs from ${document.numPages} page(s)`);
-    return ok({ items, pageCount: document.numPages });
+    log.info(`Extracted ${items.length} text runs from ${pageCount} page(s)`);
+    return ok({ items, pageCount });
   } catch (error) {
     return err(
       new AppError('UNKNOWN', 'This PDF could not be read', {
