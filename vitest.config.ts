@@ -23,6 +23,7 @@ export default defineConfig({
       '@storage': r('./src/packages/storage'),
       '@profile': r('./src/packages/profile'),
       '@form-engine': r('./src/packages/form-engine'),
+      '@resume-parser': r('./src/packages/resume-parser'),
       '@fill-engine': r('./src/packages/fill-engine'),
       '@ats': r('./src/packages/ats'),
       '@learning': r('./src/packages/learning'),

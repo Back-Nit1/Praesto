@@ -23,6 +23,7 @@ import {
   readControlValue,
   setNativeValue,
 } from '../native/set-value';
+import { FileUploadAdapter } from './file-upload';
 import type { ControlAdapter, FillFailureReason, FillResult } from '../types';
 
 const log = createLogger('fill:native');
@@ -232,6 +233,8 @@ function radioGroupFor(input: HTMLInputElement): HTMLInputElement[] {
  * last because it is the broadest.
  */
 export const NATIVE_ADAPTERS: readonly ControlAdapter[] = [
+  // File first: it is an <input>, and the text adapter must never claim it.
+  FileUploadAdapter,
   NativeCheckboxAdapter,
   NativeRadioAdapter,
   NativeSelectAdapter,

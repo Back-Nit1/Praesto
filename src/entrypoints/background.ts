@@ -43,6 +43,7 @@ import { isProfilePath, labelForPath } from '@profile/paths';
 import { LearnedMappingStore, type LearnedMappingIndex } from '@learning/mapping-memory';
 import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
 import { mapField } from '@form-engine/mapper/mapper';
+import { isResumeField } from '@form-engine/mapper/resume-field';
 import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
@@ -280,7 +281,7 @@ export default defineBackground(() => {
     }
 
     for (const action of actions) {
-      if (action.action === 'fill') readyToFill++;
+      if (action.action === 'fill' || action.action === 'attach_resume') readyToFill++;
       else if (action.action === 'suggest') needsReview++;
       else unknown++;
     }
@@ -299,6 +300,22 @@ export default defineBackground(() => {
     descriptor: FieldDescriptor,
     learned: LearnedMappingIndex,
   ): ResolvedFieldAction {
+    // 0. A resume upload is not a profile value, so it is decided before the
+    //    mapping cascade runs. It has no canonical path and a different
+    //    adapter drives it - see form-engine/mapper/resume-field.ts for why
+    //    the matcher is deliberately narrow.
+    if (isResumeField(descriptor)) {
+      const alreadyAttached = (descriptor.currentValue ?? '').trim().length > 0;
+      return {
+        localId: descriptor.localId,
+        action: alreadyAttached ? 'skip' : 'attach_resume',
+        profilePath: null,
+        mappingConfidence: 0.95,
+        knowledgeState: 'known',
+        explanation: alreadyAttached ? 'A file is already attached' : 'Resume upload',
+      };
+    }
+
     // 1. What is this field asking for? Past corrections are consulted here,
     //    and a user-confirmed one outranks every heuristic in the cascade.
     const mapping = mapField(descriptor, { learned });

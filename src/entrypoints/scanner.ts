@@ -35,6 +35,7 @@ import { detectATS } from '@ats/detector';
 import { scanPage } from '@form-engine/detector/scanner';
 import { computeFingerprints } from '@form-engine/fingerprints/fingerprint';
 import { executeFills } from '@fill-engine/executor';
+import { clearPendingResume, setPendingResume } from '@fill-engine/adapters/file-upload';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
 
 const log = createLogger('content');
@@ -159,7 +160,40 @@ export default defineUnlistedScript(() => {
      * Triggered only by an explicit user action in the side panel. Nothing on
      * this page can cause a fill.
      */
-    async function fillSafeFields(actions: readonly ResolvedFieldAction[]): Promise<void> {
+    async function fillSafeFields(
+      actions: readonly ResolvedFieldAction[],
+      resume?: { name: string; type: string; base64: string },
+    ): Promise<void> {
+      /**
+       * The resume arrives base64-encoded.
+       *
+       * `chrome.tabs.sendMessage` serialises through JSON, not structured
+       * clone, so an ArrayBuffer or a File would arrive as `{}`. Base64 costs
+       * about a third in size on a one-off, user-initiated action, which is a
+       * fair price for a transport that actually works.
+       */
+      if (resume !== undefined) {
+        setPendingResume(base64ToFile(resume.base64, resume.name, resume.type));
+      }
+
+      try {
+        await runFills(actions);
+      } finally {
+        // Cleared on every path, including failure. The page context holds the
+        // applicant's resume only for the duration of the operation.
+        clearPendingResume();
+      }
+    }
+
+    /** Decode a base64 payload back into a File the adapter can attach. */
+    function base64ToFile(base64: string, name: string, type: string): File {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new File([bytes], name, { type });
+    }
+
+    async function runFills(actions: readonly ResolvedFieldAction[]): Promise<void> {
       const outcomes = await executeFills(actions, {
         resolveElement: (localId) => elementsById.get(localId) ?? null,
       });
@@ -306,7 +340,11 @@ export default defineUnlistedScript(() => {
       }
 
       if (request?.type === 'CONTENT_FILL' && Array.isArray(request.actions)) {
-        fillSafeFields(request.actions)
+        const payload = message as {
+          resume?: { name: string; type: string; base64: string };
+        };
+
+        fillSafeFields(request.actions, payload.resume)
           .then(() => sendResponse({ ok: true }))
           .catch((error: unknown) => {
             log.error('Fill failed', error);

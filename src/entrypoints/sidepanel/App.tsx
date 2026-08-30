@@ -32,6 +32,48 @@ import type { ResolvedFieldAction } from '@shared/messages';
 import { createLogger } from '@shared/logging';
 import { labelForPath, SCALAR_PROFILE_PATHS } from '@profile/paths';
 import type { MappingScope } from '@learning/types';
+import { ChromeLocalStore } from '@storage/key-value-store';
+import { ResumeDocumentStore } from '@storage/documents';
+
+/** Matches the key written by the options page's Resume tab. */
+const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
+const settings = new ChromeLocalStore();
+const resumes = new ResumeDocumentStore();
+
+/**
+ * Read the user's default resume and encode it for the page.
+ *
+ * `chrome.tabs.sendMessage` serialises through JSON rather than structured
+ * clone, so a File or ArrayBuffer would arrive as an empty object. Base64 is
+ * the transport that actually survives, at a third more bytes on a one-off,
+ * user-initiated action.
+ *
+ * The side panel is an extension page, so it can read the extension's own
+ * IndexedDB directly. The content script cannot: `indexedDB` there is the
+ * PAGE's database, not ours - which is exactly the isolation we want.
+ */
+async function loadResumePayload(): Promise<
+  { name: string; type: string; base64: string } | undefined
+> {
+  const saved = await settings.get<string>(DEFAULT_RESUME_KEY);
+  if (!saved.ok || saved.value === undefined) return undefined;
+
+  const file = await resumes.toFile(saved.value);
+  if (!file.ok) return undefined;
+
+  const bytes = new Uint8Array(await file.value.arrayBuffer());
+
+  // Chunked, because String.fromCharCode(...bytes) on a 1 MB array blows the
+  // argument limit and throws a RangeError - a failure that only shows up on
+  // larger resumes and looks like a mystery.
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+
+  return { name: file.value.name, type: file.value.type, base64: btoa(binary) };
+}
 
 const log = createLogger('sidepanel');
 
@@ -156,13 +198,30 @@ export function App(): ReactNode {
 
   async function handleFill(actions: ResolvedFieldAction[]): Promise<void> {
     setBusy(true);
+
+    // Only loaded when the page actually has a resume field. Otherwise we would
+    // push the applicant's document into a webpage's context for no reason.
+    const needsResume = actions.some((action) => action.action === 'attach_resume');
+    const resume = needsResume ? await loadResumePayload() : undefined;
+
+    if (needsResume && resume === undefined) {
+      setStatus({
+        kind: 'error',
+        message: 'This form wants a resume, but none is saved. Add one under Edit your profile.',
+      });
+    }
+
     await sendToActiveTab({
       type: 'CONTENT_FILL',
       // Only the safe ones cross. Sending `suggest` actions and filtering in the
       // page would put the policy decision in two places, and the page context
       // is the one place it must never live.
-      actions: actions.filter((action) => action.action === 'fill'),
+      actions: actions.filter(
+        (action) => action.action === 'fill' || action.action === 'attach_resume',
+      ),
+      ...(resume !== undefined ? { resume } : {}),
     });
+
     setBusy(false);
     setState({ kind: 'filled', actions });
   }
@@ -241,7 +300,9 @@ function ScanReport({
   onRescan: () => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
-  const ready = actions.filter((action) => action.action === 'fill');
+  const ready = actions.filter(
+    (action) => action.action === 'fill' || action.action === 'attach_resume',
+  );
   const review = actions.filter((action) => action.action === 'suggest');
   const skipped = actions.filter((action) => action.action === 'skip');
 

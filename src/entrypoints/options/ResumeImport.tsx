@@ -1,0 +1,410 @@
+/**
+ * Resume import and review.
+ * ---------------------------------------------------------------------------
+ * Spec section 2's onboarding path, and spec section 9's verification UX:
+ *
+ *     upload -> parse -> REVIEW EVERY VALUE -> merge into the profile
+ *
+ * THE REVIEW STEP IS NOT A FORMALITY.
+ * Nothing a parser extracts reaches the profile without passing through this
+ * screen. Every proposed value is shown next to the exact source text it came
+ * from, with its confidence, and the user can uncheck any of them. That is what
+ * makes the acceptance criterion in spec 25.4 achievable:
+ *
+ *   > Every extracted value is either correct or visibly uncertain. Unsupported
+ *   > or fabricated values must not silently enter the verified profile.
+ *
+ * WHAT ACCEPTING MEANS
+ * Accepting a value routes it through `ProfileRepository.mergeCandidates`, which
+ * still refuses to overwrite anything already verified and reports a conflict
+ * rather than silently replacing a disagreement. So even an over-eager click on
+ * this screen cannot destroy a value the user previously confirmed.
+ *
+ * The stored PDF is separate from the parsed values: it stays in IndexedDB so
+ * it can be attached to application forms, whether or not any extracted value
+ * was accepted.
+ */
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Button, StateBadge, StatusLine } from '@/components/ui';
+import { ChromeLocalStore } from '@storage/key-value-store';
+import { ResumeDocumentStore, type ResumeDocumentSummary } from '@storage/documents';
+import { StoredProfileRepository } from '@profile/repository';
+import { labelForPath } from '@profile/paths';
+import { bestConfidence, type ProfileValue } from '@profile/schema';
+import { parseResume, type ResumeParseResult } from '@resume-parser/index';
+import { createLogger } from '@shared/logging';
+
+const log = createLogger('options:resume');
+
+const documents = new ResumeDocumentStore();
+const profiles = new StoredProfileRepository(new ChromeLocalStore());
+
+/** Storage key for "which resume to attach to applications by default". */
+const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
+const store = new ChromeLocalStore();
+
+export function ResumeImport(): ReactNode {
+  const [stored, setStored] = useState<ResumeDocumentSummary[]>([]);
+  const [defaultId, setDefaultId] = useState<string | undefined>(undefined);
+  const [parsed, setParsed] = useState<ResumeParseResult | undefined>(undefined);
+  const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
+    kind: 'idle',
+  });
+
+  const load = useCallback(async () => {
+    const [list, saved] = await Promise.all([
+      documents.list(),
+      store.get<string>(DEFAULT_RESUME_KEY),
+    ]);
+    if (list.ok) setStored(list.value);
+    if (saved.ok) setDefaultId(saved.value);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /**
+   * Store the file, then parse it.
+   *
+   * Store FIRST, deliberately. If parsing fails - a scanned PDF, an unusual
+   * layout - the user still has their resume saved and attachable to
+   * applications, which is most of the value. Parsing first and storing only on
+   * success would throw away the useful half on the failure path.
+   */
+  async function handleUpload(file: File): Promise<void> {
+    setBusy(true);
+    setStatus({ kind: 'idle' });
+    setParsed(undefined);
+
+    const saved = await documents.add(file);
+    if (!saved.ok) {
+      setStatus({ kind: 'error', message: saved.error.message });
+      setBusy(false);
+      return;
+    }
+
+    await load();
+
+    // First resume uploaded becomes the default to attach. One less step for
+    // the overwhelmingly common case of having exactly one resume.
+    if (defaultId === undefined) {
+      await store.set(DEFAULT_RESUME_KEY, saved.value.id);
+      setDefaultId(saved.value.id);
+    }
+
+    const bytes = await file.arrayBuffer();
+    const result = await parseResume(bytes, saved.value.id);
+
+    if (!result.ok) {
+      setStatus({
+        kind: 'error',
+        message: `${result.error.message}. Your resume is still saved and can be attached to applications.`,
+      });
+      setBusy(false);
+      return;
+    }
+
+    if (result.value.scanned) {
+      setStatus({
+        kind: 'error',
+        message:
+          'This PDF has no text layer - it looks like a scan or an image. It is saved and can still be attached to applications, but nothing could be read from it. Fill in the Profile tab by hand.',
+      });
+      setBusy(false);
+      return;
+    }
+
+    setParsed(result.value);
+    // Pre-check everything so accepting a good parse is one click. Unchecking
+    // is the exception, and the user is looking at every row regardless.
+    setAccepted(new Set(Object.keys(result.value.scalars)));
+    setBusy(false);
+  }
+
+  /** Merge the checked values into the profile. */
+  async function handleAccept(): Promise<void> {
+    if (parsed === undefined) return;
+    setBusy(true);
+
+    const candidates: Record<string, ProfileValue<unknown>> = {};
+    for (const [path, value] of Object.entries(parsed.scalars)) {
+      if (accepted.has(path)) candidates[path] = value;
+    }
+
+    // Repeated entities are appended wholesale. They have no existing slot to
+    // conflict with, and `mergeCandidates` only handles paths into slots that
+    // already exist - see its `out_of_range` case.
+    const appended = await profiles.update((profile) => ({
+      ...profile,
+      education: [...profile.education, ...parsed.education],
+      employment: [...profile.employment, ...parsed.employment],
+      projects: [...profile.projects, ...parsed.projects],
+    }));
+
+    if (!appended.ok) {
+      setStatus({ kind: 'error', message: appended.error.message });
+      setBusy(false);
+      return;
+    }
+
+    const merged = await profiles.mergeCandidates(candidates);
+    setBusy(false);
+
+    if (!merged.ok) {
+      setStatus({ kind: 'error', message: merged.error.message });
+      return;
+    }
+
+    const { applied, skippedVerified, conflicts } = merged.value;
+    setParsed(undefined);
+
+    // Report what actually happened, including what was declined and why. A
+    // bare "imported!" would hide that some values were left out.
+    const parts = [`${applied.length} field${applied.length === 1 ? '' : 's'} imported`];
+    if (skippedVerified.length > 0) {
+      parts.push(`${skippedVerified.length} left alone because you had already verified them`);
+    }
+    if (conflicts.length > 0) {
+      parts.push(`${conflicts.length} disagreed with existing values - check the Profile tab`);
+    }
+    setStatus({ kind: 'ok', message: `${parts.join('. ')}.` });
+  }
+
+  async function handleSetDefault(id: string): Promise<void> {
+    await store.set(DEFAULT_RESUME_KEY, id);
+    setDefaultId(id);
+    setStatus({ kind: 'ok', message: 'This resume will be attached to applications.' });
+  }
+
+  async function handleDelete(id: string): Promise<void> {
+    const removed = await documents.remove(id);
+    if (!removed.ok) {
+      setStatus({ kind: 'error', message: removed.error.message });
+      return;
+    }
+    if (defaultId === id) {
+      await store.remove(DEFAULT_RESUME_KEY);
+      setDefaultId(undefined);
+    }
+    await load();
+    setStatus({ kind: 'ok', message: 'Resume deleted' });
+  }
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <section>
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Your resume
+        </h2>
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+          Upload a PDF. It is stored on this computer, in this browser, and is never sent anywhere.
+          The extension reads it once to fill in your profile, and attaches it to the resume field on
+          applications so you do not have to find the file every time.
+        </p>
+
+        <label className="inline-block cursor-pointer rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          {busy ? 'Working...' : 'Upload a PDF resume'}
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file !== undefined) void handleUpload(file);
+              // Reset, so re-selecting the same file fires `change` again.
+              event.target.value = '';
+            }}
+          />
+        </label>
+      </section>
+
+      <StatusLine status={status} />
+
+      {stored.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Stored ({stored.length})
+          </h3>
+          <ul className="space-y-1">
+            {stored.map((document) => (
+              <li
+                key={document.id}
+                className="flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  {document.fileName}
+                  <span className="ml-2 text-xs text-zinc-500">
+                    {Math.round(document.sizeBytes / 1024)} KB ·{' '}
+                    {new Date(document.addedAt).toLocaleDateString()}
+                  </span>
+                </span>
+                <div className="flex shrink-0 items-center gap-3">
+                  {defaultId === document.id ? (
+                    <span className="text-xs font-medium text-green-600">Attached to applications</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSetDefault(document.id)}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Use this one
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(document.id)}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {parsed !== undefined && (
+        <ReviewExtraction
+          parsed={parsed}
+          accepted={accepted}
+          busy={busy}
+          onToggle={(path) =>
+            setAccepted((current) => {
+              const next = new Set(current);
+              if (next.has(path)) next.delete(path);
+              else next.add(path);
+              return next;
+            })
+          }
+          onAccept={() => void handleAccept()}
+          onDiscard={() => {
+            setParsed(undefined);
+            log.info('Extraction discarded by the user');
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The review table.
+ *
+ * Every row shows the proposed value AND the source text it was read from. The
+ * source text is what makes review possible rather than nominal: "New Brunswick"
+ * on its own is unverifiable at a glance, but "New Brunswick, NJ · (609)
+ * 555-1234 · nitu@example.com" makes it instantly obvious whether we read the
+ * right thing.
+ */
+function ReviewExtraction({
+  parsed,
+  accepted,
+  busy,
+  onToggle,
+  onAccept,
+  onDiscard,
+}: {
+  parsed: ResumeParseResult;
+  accepted: Set<string>;
+  busy: boolean;
+  onToggle: (path: string) => void;
+  onAccept: () => void;
+  onDiscard: () => void;
+}): ReactNode {
+  const entries = Object.entries(parsed.scalars);
+
+  return (
+    <section className="space-y-3 rounded border border-blue-200 bg-blue-50/40 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+      <div>
+        <h3 className="text-sm font-semibold">Check what we read</h3>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Nothing is saved until you accept it. Uncheck anything that is wrong — a blank field is
+          always better than a wrong one.
+        </p>
+      </div>
+
+      <table className="w-full text-left text-sm">
+        <thead className="text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th className="w-8 py-1" />
+            <th className="py-1">Field</th>
+            <th className="py-1">We read</th>
+            <th className="py-1">From this line</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([path, value]) => {
+            const confidence = bestConfidence(value);
+            return (
+              <tr key={path} className="border-t border-blue-200/60 dark:border-blue-900/60">
+                <td className="py-2">
+                  <input
+                    type="checkbox"
+                    checked={accepted.has(path)}
+                    onChange={() => onToggle(path)}
+                    aria-label={`Accept ${labelForPath(path)}`}
+                  />
+                </td>
+                <td className="py-2 pr-3">
+                  <span className="flex items-center gap-2">
+                    {/* Anything under 0.85 is shown as "needs review" rather
+                        than "high confidence" - the same thresholds the profile
+                        editor uses, so the two screens never disagree. */}
+                    <StateBadge state={confidence >= 0.85 ? 'high_confidence' : 'needs_review'} />
+                    {labelForPath(path)}
+                  </span>
+                </td>
+                <td className="py-2 pr-3 font-medium">{renderValue(value.value)}</td>
+                <td className="py-2 text-xs text-zinc-500">
+                  {value.evidence[0]?.originalText ?? '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {(parsed.education.length > 0 ||
+        parsed.employment.length > 0 ||
+        parsed.projects.length > 0) && (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Also found {parsed.education.length} education, {parsed.employment.length} experience and{' '}
+          {parsed.projects.length} project entries. These are added as-is — review them in the
+          Profile tab, where you can correct anything that was read wrong.
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <Button onClick={onAccept} disabled={busy}>
+          Add {accepted.size} field{accepted.size === 1 ? '' : 's'} to my profile
+        </Button>
+        <Button variant="secondary" onClick={onDiscard} disabled={busy}>
+          Discard
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** Render a candidate value for display, whatever shape it is. */
+function renderValue(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    // Skills lists get long; showing forty of them makes the table unreadable.
+    const shown = value.slice(0, 8).join(', ');
+    return value.length > 8 ? `${shown}, +${value.length - 8} more` : shown;
+  }
+  if (typeof value === 'object') {
+    // NormalizedPhone and NormalizedDate both keep the source text in `raw`,
+    // which is the most faithful thing to show for review.
+    const record = value as { raw?: string; national?: string };
+    return record.national ?? record.raw ?? JSON.stringify(value);
+  }
+  return String(value);
+}

@@ -63,9 +63,13 @@ export async function executeFills(
   let processed = 0;
 
   for (const action of actions) {
-    // Only `fill`. `suggest` is the user's call and `skip` means we decided not
-    // to act - honouring that here is what makes the policy meaningful.
-    if (action.action !== 'fill' || action.value === undefined) {
+    // `fill` and `attach_resume` are actions; `suggest` is the user's call and
+    // `skip` means we decided not to act. Honouring that distinction here is
+    // what makes the confidence policy mean anything.
+    const isActionable =
+      action.action === 'attach_resume' || (action.action === 'fill' && action.value !== undefined);
+
+    if (!isActionable) {
       outcomes.push({
         localId: action.localId,
         profilePath: action.profilePath,
@@ -109,6 +113,11 @@ async function fillOne(
     ...(action.optionValue !== undefined ? { optionValue: action.optionValue } : {}),
   };
 
+  // The file adapter ignores the value entirely - it attaches whatever resume
+  // the user selected for this run. An empty string keeps the adapter contract
+  // uniform without inventing a meaningless value.
+  const value: string | boolean = action.value ?? '';
+
   const adapter = adapters.find((candidate) => candidate.canHandle(context));
   if (adapter === undefined) {
     return { ...base, attempted: false, verified: false, failureReason: 'no_adapter' };
@@ -119,7 +128,7 @@ async function fillOne(
   // aborting the rest of the fill run.
   let filled;
   try {
-    filled = await adapter.fill(context, action.value as string | boolean);
+    filled = await adapter.fill(context, value);
   } catch (error) {
     log.warn('Adapter threw during fill', adapter.name, error);
     return {
@@ -142,7 +151,7 @@ async function fillOne(
   }
 
   // THE READ-BACK. Nothing is reported as filled until this passes.
-  const verified = await adapter.verify(context, action.value as string | boolean).catch(() => false);
+  const verified = await adapter.verify(context, value).catch(() => false);
 
   return {
     ...base,

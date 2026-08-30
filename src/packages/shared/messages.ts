@@ -249,7 +249,14 @@ export type RecordCorrectionRequest = z.infer<typeof recordCorrectionRequestSche
  */
 export const resolvedFieldActionSchema = z.object({
   localId: z.string(),
-  action: z.enum(['fill', 'suggest', 'skip']),
+  /**
+   * `attach_resume` is its own action rather than a `fill` with a special
+   * value. A resume is a document, not a profile value: it has no canonical
+   * path, it is executed by a different adapter, and the side panel counts it
+   * separately ("1 resume attached"). Overloading `fill` would have hidden all
+   * three of those differences behind a sentinel string.
+   */
+  action: z.enum(['fill', 'suggest', 'skip', 'attach_resume']),
   /** Present for fill and suggest. Absent for skip - there is nothing to send. */
   value: z.union([z.string(), z.boolean()]).optional(),
   /** For option controls, the option value the adapter should select. */

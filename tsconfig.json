@@ -27,6 +27,7 @@
       "@storage/*": ["./src/packages/storage/*"],
       "@profile/*": ["./src/packages/profile/*"],
       "@form-engine/*": ["./src/packages/form-engine/*"],
+      "@resume-parser/*": ["./src/packages/resume-parser/*"],
       "@fill-engine/*": ["./src/packages/fill-engine/*"],
       "@ats/*": ["./src/packages/ats/*"],
       "@learning/*": ["./src/packages/learning/*"]

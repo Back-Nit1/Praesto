@@ -13,11 +13,13 @@ import { useProfile } from '@/hooks/use-profile';
 import { ProfileEditor } from './ProfileEditor';
 import { MappingPlayground } from './MappingPlayground';
 import { LearnedRules } from './LearnedRules';
+import { ResumeImport } from './ResumeImport';
 
-type Tab = 'profile' | 'learned' | 'playground';
+type Tab = 'profile' | 'resume' | 'learned' | 'playground';
 
 const TAB_LABELS: Record<Tab, string> = {
   profile: 'Profile',
+  resume: 'Resume',
   learned: 'Learned rules',
   playground: 'Mapping playground',
 };
@@ -111,7 +113,7 @@ export function App(): ReactNode {
       {error !== undefined && <StatusLine status={{ kind: 'error', message: error }} />}
 
       <nav className="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-700">
-        {(['profile', 'learned', 'playground'] as const).map((candidate) => (
+        {(['profile', 'resume', 'learned', 'playground'] as const).map((candidate) => (
           <button
             key={candidate}
             type="button"
@@ -128,6 +130,7 @@ export function App(): ReactNode {
       </nav>
 
       {tab === 'profile' && profile !== undefined && <ProfileEditor profile={profile} edit={edit} />}
+      {tab === 'resume' && <ResumeImport />}
       {tab === 'learned' && <LearnedRules />}
       {tab === 'playground' && <MappingPlayground profile={profile} />}
     </div>
