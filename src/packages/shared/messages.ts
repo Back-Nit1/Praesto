@@ -199,6 +199,25 @@ export const getPageStateRequestSchema = z.object({
 });
 
 /**
+ * The page revealed or removed form controls after the last scan.
+ *
+ * Broadcast by the scanner's MutationObserver. It is addressed to the SIDE
+ * PANEL, but a content script cannot message an extension page directly - a
+ * `chrome.runtime.sendMessage` reaches every extension context that is
+ * listening, which includes the panel and the worker.
+ *
+ * It exists in this schema so the worker recognises it and answers OK instead
+ * of rejecting it as a malformed message on every re-render of a dynamic form.
+ * The worker does nothing else with it: acting on a page change without the
+ * user asking would be an auto-fill path, and there is deliberately none.
+ */
+export const pageFieldsChangedRequestSchema = z.object({
+  type: z.literal('PAGE_FIELDS_CHANGED'),
+  version: z.number().int(),
+  page: pageContextSchema,
+});
+
+/**
  * The user teaching the system what a field means (spec section 19).
  *
  * Carries the whole descriptor rather than a fingerprint. Fingerprinting stays
@@ -228,6 +247,7 @@ export const extensionRequestSchema = z.discriminatedUnion('type', [
   reportFillResultsRequestSchema,
   getPageStateRequestSchema,
   recordCorrectionRequestSchema,
+  pageFieldsChangedRequestSchema,
 ]);
 
 export type ExtensionRequest = z.infer<typeof extensionRequestSchema>;
@@ -235,6 +255,7 @@ export type PingRequest = z.infer<typeof pingRequestSchema>;
 export type ResolveApplicationFieldsRequest = z.infer<typeof resolveApplicationFieldsRequestSchema>;
 export type ReportFillResultsRequest = z.infer<typeof reportFillResultsRequestSchema>;
 export type RecordCorrectionRequest = z.infer<typeof recordCorrectionRequestSchema>;
+export type PageFieldsChangedRequest = z.infer<typeof pageFieldsChangedRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Responses (service worker -> caller)

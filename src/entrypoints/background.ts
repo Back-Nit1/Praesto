@@ -185,6 +185,18 @@ export default defineBackground(() => {
       case 'GET_PAGE_STATE':
         return { ok: true, type: 'OK' };
 
+      case 'PAGE_FIELDS_CHANGED':
+        // Acknowledged and otherwise ignored, deliberately. The broadcast is
+        // addressed to the SIDE PANEL - a content script cannot message an
+        // extension page directly, so it goes through runtime.sendMessage,
+        // which reaches every listening context including this one.
+        //
+        // Recognising it here stops the worker rejecting it as malformed on
+        // every re-render of a dynamic form. Acting on it would mean filling a
+        // field because the PAGE changed rather than because the user asked,
+        // and there is deliberately no such path.
+        return { ok: true, type: 'OK' };
+
       case 'RECORD_CORRECTION': {
         // Reject an unrecognised path BEFORE storing it. A rule pointing at a
         // path that does not exist would resolve to nothing forever, and the

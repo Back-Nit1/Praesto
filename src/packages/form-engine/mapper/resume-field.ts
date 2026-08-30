@@ -78,7 +78,23 @@ export function isResumeField(descriptor: FieldDescriptor): boolean {
   if (haystack.length === 0) return false;
 
   // Disqualifiers first - see the comment on OTHER_DOCUMENT_TERMS.
-  if (OTHER_DOCUMENT_TERMS.some((term) => haystack.includes(term))) return false;
+  if (OTHER_DOCUMENT_TERMS.some((term) => containsPhrase(haystack, term))) return false;
 
-  return RESUME_TERMS.some((term) => haystack.includes(term));
+  return RESUME_TERMS.some((term) => containsPhrase(haystack, term));
+}
+
+/**
+ * Whole-word phrase match.
+ *
+ * A plain `includes` is wrong here, and wrong in a way that is easy to miss:
+ * the two-letter terms match inside ordinary words. "id" appears inside
+ * "candidate", so `candidate[cv]` - an obvious resume field - was disqualified
+ * as an ID upload. "cv" would likewise match inside "cvs".
+ *
+ * The haystack is already normalized to lowercase words separated by single
+ * spaces, so padding both sides and searching for a space-delimited phrase is
+ * sufficient and needs no regex escaping.
+ */
+function containsPhrase(haystack: string, phrase: string): boolean {
+  return ` ${haystack} `.includes(` ${phrase} `);
 }

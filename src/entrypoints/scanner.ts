@@ -31,6 +31,13 @@ import {
   type ResolveApplicationFieldsRequest,
   type ResolvedFieldAction,
 } from '@shared/messages';
+import type {
+  ContentFillResponse,
+  ContentScanResponse,
+  ContentErrorResponse,
+  FieldFillReport,
+  ResumePayload,
+} from '@shared/page-protocol';
 import { detectATS } from '@ats/detector';
 import { scanPage } from '@form-engine/detector/scanner';
 import { computeFingerprints } from '@form-engine/fingerprints/fingerprint';
@@ -108,8 +115,24 @@ export default defineUnlistedScript(() => {
       return controls.length >= 3;
     }
 
+    /**
+     * The outcome of a scan, INCLUDING the ways it can usefully fail.
+     *
+     * `error` and `fieldsDetected` exist because collapsing them was a real
+     * bug: every worker failure used to be returned as an empty action list,
+     * and the panel reads an empty action list as "no application form here".
+     * A first-time user with no profile was therefore told the page had no
+     * form, which is both wrong and unactionable. A missing profile and a
+     * missing form need different sentences, so they need different data.
+     */
+    interface ScanOutcome {
+      actions: ResolvedFieldAction[];
+      fieldsDetected: number;
+      error?: { code: string; message: string };
+    }
+
     /** Scan, ask the worker what to do, and report back. Never fills. */
-    async function scanAndResolve(root?: ParentNode): Promise<ResolvedFieldAction[]> {
+    async function scanAndResolve(root?: ParentNode): Promise<ScanOutcome> {
       const ats = detectATS(
         { url: location.href, hostname: location.hostname, title: document.title },
         document,
@@ -127,7 +150,7 @@ export default defineUnlistedScript(() => {
 
       lastDescriptors = scan.fields;
 
-      if (scan.fields.length === 0) return [];
+      if (scan.fields.length === 0) return { actions: [], fieldsDetected: 0 };
 
       const request: ResolveApplicationFieldsRequest = {
         type: 'RESOLVE_APPLICATION_FIELDS',
@@ -140,18 +163,31 @@ export default defineUnlistedScript(() => {
 
       if (response === undefined || !response.ok) {
         // The worker was asleep, the extension was reloaded, or the profile is
-        // missing. All are recoverable and none justify disturbing the page.
-        log.warn('Field resolution unavailable', response?.ok === false ? response.code : 'no response');
-        return [];
+        // missing. None justify disturbing the page - but they must not be
+        // flattened into "we found nothing" either. The CODE travels back to
+        // the panel, which is the only surface that can act on it (by offering
+        // onboarding, a retry, or an explanation).
+        const error =
+          response === undefined
+            ? { code: 'WORKER_UNAVAILABLE', message: 'The extension did not answer' }
+            : { code: response.code, message: response.message };
+        log.warn('Field resolution unavailable', error.code);
+        return { actions: [], fieldsDetected: scan.fields.length, error };
       }
-      if (response.type !== 'RESOLVE_APPLICATION_FIELDS_RESULT') return [];
+      if (response.type !== 'RESOLVE_APPLICATION_FIELDS_RESULT') {
+        return {
+          actions: [],
+          fieldsDetected: scan.fields.length,
+          error: { code: 'UNEXPECTED_RESPONSE', message: 'The extension answered unexpectedly' },
+        };
+      }
 
       log.info(
         `${scan.fields.length} fields in ${scan.scanDurationMs}ms: ` +
           `${response.summary.readyToFill} ready, ${response.summary.needsReview} to review`,
       );
 
-      return response.actions;
+      return { actions: response.actions, fieldsDetected: scan.fields.length };
     }
 
     /**
@@ -162,8 +198,8 @@ export default defineUnlistedScript(() => {
      */
     async function fillSafeFields(
       actions: readonly ResolvedFieldAction[],
-      resume?: { name: string; type: string; base64: string },
-    ): Promise<void> {
+      resume?: ResumePayload,
+    ): Promise<FieldFillReport[]> {
       /**
        * The resume arrives base64-encoded.
        *
@@ -177,7 +213,11 @@ export default defineUnlistedScript(() => {
       }
 
       try {
-        await runFills(actions);
+        // The outcomes are RETURNED, not merely logged. The panel is the
+        // surface that tells the user "13 filled"; if it does not receive the
+        // per-field truth it can only assert success, which is exactly the
+        // trust failure the verify step exists to prevent.
+        return await runFills(actions);
       } finally {
         // Cleared on every path, including failure. The page context holds the
         // applicant's resume only for the duration of the operation.
@@ -193,7 +233,7 @@ export default defineUnlistedScript(() => {
       return new File([bytes], name, { type });
     }
 
-    async function runFills(actions: readonly ResolvedFieldAction[]): Promise<void> {
+    async function runFills(actions: readonly ResolvedFieldAction[]): Promise<FieldFillReport[]> {
       const outcomes = await executeFills(actions, {
         resolveElement: (localId) => elementsById.get(localId) ?? null,
       });
@@ -222,6 +262,17 @@ export default defineUnlistedScript(() => {
           // fill already happened and they can see it.
           log.debugLazy(() => ['Could not report fill results', error]);
         });
+
+      // What the PANEL is told. The profile path is deliberately absent: the
+      // panel already knows it from the action it sent, and a fill report is
+      // not a place to restate where a value came from.
+      return outcomes.map((outcome) => ({
+        localId: outcome.localId,
+        attempted: outcome.attempted,
+        verified: outcome.verified,
+        ...(outcome.adapter !== undefined ? { adapter: outcome.adapter } : {}),
+        ...(outcome.failureReason !== undefined ? { failureReason: outcome.failureReason } : {}),
+      }));
     }
 
     /**
@@ -310,10 +361,35 @@ export default defineUnlistedScript(() => {
 
       if (request?.type === 'CONTENT_SCAN') {
         scanAndResolve()
-          .then((actions) => sendResponse({ ok: true, actions }))
+          .then((outcome) => {
+            // A worker-side failure is reported AS a failure, with its code
+            // intact. Returning `{ ok: true, actions: [] }` here would tell the
+            // panel the page has no form - the wrong diagnosis for a missing
+            // profile, an evicted worker, or a failed migration.
+            if (outcome.error !== undefined) {
+              const failure: ContentErrorResponse = {
+                ok: false,
+                code: outcome.error.code,
+                message: outcome.error.message,
+              };
+              sendResponse(failure);
+              return;
+            }
+            const success: ContentScanResponse = {
+              ok: true,
+              actions: outcome.actions,
+              fieldsDetected: outcome.fieldsDetected,
+            };
+            sendResponse(success);
+          })
           .catch((error: unknown) => {
             log.error('Scan failed', error);
-            sendResponse({ ok: false, code: 'SCAN_FAILED', message: 'Could not scan this page' });
+            const failure: ContentErrorResponse = {
+              ok: false,
+              code: 'SCAN_FAILED',
+              message: 'Could not scan this page',
+            };
+            sendResponse(failure);
           });
         return true;
       }
@@ -340,15 +416,24 @@ export default defineUnlistedScript(() => {
       }
 
       if (request?.type === 'CONTENT_FILL' && Array.isArray(request.actions)) {
-        const payload = message as {
-          resume?: { name: string; type: string; base64: string };
-        };
+        const payload = message as { resume?: ResumePayload };
 
         fillSafeFields(request.actions, payload.resume)
-          .then(() => sendResponse({ ok: true }))
+          .then((outcomes) => {
+            // The per-field truth crosses back. `{ ok: true }` used to be the
+            // whole reply, which is how the panel came to say "Filled" for a
+            // field a React input had silently rejected.
+            const success: ContentFillResponse = { ok: true, outcomes };
+            sendResponse(success);
+          })
           .catch((error: unknown) => {
             log.error('Fill failed', error);
-            sendResponse({ ok: false, code: 'FILL_FAILED', message: 'Could not fill this page' });
+            const failure: ContentErrorResponse = {
+              ok: false,
+              code: 'FILL_FAILED',
+              message: 'Could not fill this page',
+            };
+            sendResponse(failure);
           });
         return true;
       }
@@ -368,11 +453,36 @@ export default defineUnlistedScript(() => {
       log.info('Application-shaped page detected; ready to scan on request');
     }
 
-    // Watch for dynamically revealed fields. Note this only ever LOGS - it does
-    // not trigger a fill. A form that reveals a question in response to an
-    // answer must not have that question filled without the user seeing it.
+    // Watch for dynamically revealed fields.
+    //
+    // This NEVER fills. A form that reveals a question in response to an answer
+    // must not have that question answered without the user seeing it. What it
+    // does is tell the side panel that the page has changed, so the panel can
+    // offer a rescan - the user's click remains the only thing that acts.
     watchForNewFields(() => {
       log.debugLazy(() => ['New nodes appeared; a rescan would be useful']);
+
+      // Broadcast rather than addressed: a content script cannot message an
+      // extension page directly. Every listening extension context receives
+      // this, which is how it reaches the side panel. The worker recognises the
+      // type and answers OK; it takes no action on it.
+      void chrome.runtime
+        .sendMessage({
+          type: 'PAGE_FIELDS_CHANGED',
+          version: MESSAGE_PROTOCOL_VERSION,
+          page: {
+            url: location.href,
+            hostname: location.hostname,
+            ats: detectATS(
+              { url: location.href, hostname: location.hostname, title: document.title },
+              document,
+            ),
+          },
+        })
+        .catch(() => {
+          // Nothing was listening - the panel is closed, or the worker is
+          // asleep and the page is idle. Not a problem worth a log line.
+        });
     });
   }
 });
