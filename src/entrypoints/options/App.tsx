@@ -59,12 +59,40 @@ export function App(): ReactNode {
     anchor.href = url;
     anchor.download = `applicant-profile-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
-    // Revoking matters: the blob holds the profile in memory until released.
-    URL.revokeObjectURL(url);
+    /**
+     * Revoking matters: the blob holds the profile in memory until released.
+     *
+     * Deferred by one task rather than revoked inline. `anchor.click()` starts
+     * the download asynchronously, and revoking in the same turn is a race
+     * Chrome sometimes loses - the user gets a "download failed" for a file
+     * that was built correctly. One `setTimeout(0)` is enough to be after the
+     * download has taken its reference, and the profile is still released in
+     * the same millisecond rather than living until the page closes.
+     */
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     setStatus({ kind: 'ok', message: 'Profile exported' });
   }
 
+  /**
+   * Largest profile export accepted on import.
+   *
+   * A profile is a few KB. The cap exists because `file.text()` reads the
+   * WHOLE file into memory before anything validates it, so a mis-selected
+   * disk image would be materialised as a JavaScript string - on a 4 GB
+   * machine, that is the tab dying before a single check has run. Refusing by
+   * SIZE is the only check that can happen before the read.
+   */
+  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+
   async function handleImport(file: File): Promise<void> {
+    if (file.size > MAX_IMPORT_BYTES) {
+      setStatus({
+        kind: 'error',
+        message: 'That file is far too large to be a profile export.',
+      });
+      return;
+    }
+
     const text = await file.text();
     const ok = await importJson(text);
     setStatus(

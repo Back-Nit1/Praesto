@@ -79,7 +79,18 @@ export function ResumeImport(): ReactNode {
     setStatus({ kind: 'idle' });
     setParsed(undefined);
 
-    const saved = await documents.add(file);
+    /**
+     * Read the file ONCE.
+     *
+     * Both the store and the parser need the bytes, and `file.arrayBuffer()`
+     * hands back a fresh copy each call - so reading in both places meant two
+     * full buffers and two disk reads for every upload. For a 10 MB resume on
+     * a 4 GB Chromebook that is the largest avoidable allocation in the whole
+     * extension.
+     */
+    const bytes = await file.arrayBuffer();
+
+    const saved = await documents.add(file, undefined, bytes);
     if (!saved.ok) {
       setStatus({ kind: 'error', message: saved.error.message });
       setBusy(false);
@@ -95,7 +106,6 @@ export function ResumeImport(): ReactNode {
       setDefaultId(saved.value.id);
     }
 
-    const bytes = await file.arrayBuffer();
     const result = await parseResume(bytes, saved.value.id);
 
     if (!result.ok) {

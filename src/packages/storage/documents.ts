@@ -121,7 +121,23 @@ export class ResumeDocumentStore {
    * Validates before writing. A rejected file must leave storage exactly as it
    * was - the user still has whatever resume they had before.
    */
-  async add(file: File, label?: string): Promise<Result<ResumeDocumentSummary, AppError>> {
+  /**
+   * @param file  the user's selection
+   * @param label optional user-facing label
+   * @param bytes the file's contents, when the CALLER has already read them.
+   *
+   * The third parameter exists purely to stop a 10 MB file being read twice.
+   * The import flow needs the bytes anyway (to parse the resume), and
+   * `file.arrayBuffer()` returns a FRESH copy on every call - so without this,
+   * uploading one resume allocated two full buffers and did two disk reads.
+   * On a low-memory machine that doubled the peak of the single largest
+   * allocation the extension ever makes.
+   */
+  async add(
+    file: File,
+    label?: string,
+    bytes?: ArrayBuffer,
+  ): Promise<Result<ResumeDocumentSummary, AppError>> {
     if (!ACCEPTED_MIME_TYPES.has(file.type)) {
       return err(
         new AppError('SCHEMA_VALIDATION_FAILED', 'Only PDF resumes are supported right now', {
@@ -139,12 +155,13 @@ export class ResumeDocumentStore {
     }
 
     // Read AFTER the size check, so an oversized file is refused before it is
-    // pulled into memory rather than after.
-    const bytes = await file.arrayBuffer();
+    // pulled into memory rather than after. Reused when the caller already
+    // has the bytes.
+    const contents = bytes ?? (await file.arrayBuffer());
 
     // SECURITY: content check. `file.type` above is a claim about the
     // extension; this is the fact.
-    if (!looksLikePdf(bytes)) {
+    if (!looksLikePdf(contents)) {
       return err(
         new AppError('SCHEMA_VALIDATION_FAILED', 'That file is not a PDF, whatever it is named'),
       );
@@ -154,7 +171,7 @@ export class ResumeDocumentStore {
       id: newId('resume'),
       fileName: sanitizeFileName(file.name),
       mimeType: file.type,
-      bytes,
+      bytes: contents,
       sizeBytes: file.size,
       addedAt: new Date().toISOString(),
       ...(label !== undefined ? { label } : {}),
