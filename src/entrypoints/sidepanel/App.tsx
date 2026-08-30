@@ -483,11 +483,26 @@ export function App(): ReactNode {
     const needsResume = requested.some((action) => action.action === 'attach_resume');
     const resume = needsResume ? await loadResumePayload() : undefined;
 
+    /**
+     * No resume saved: drop the attach actions rather than sending them.
+     *
+     * Sending them anyway made the run report a failed field ("The page refused
+     * the value") for a situation that is not the page's fault and that the
+     * user can fix in one place - and the summary line then overwrote the
+     * message saying so. Dropping them keeps the explanation on screen and
+     * keeps the failure count honest about the fields we actually attempted.
+     */
+    let toFill = requested;
     if (needsResume && resume === undefined) {
       setStatus({
         kind: 'error',
         message: 'This form wants a resume, but none is saved. Add one under Edit your profile.',
       });
+      toFill = requested.filter((action) => action.action !== 'attach_resume');
+      if (toFill.length === 0) {
+        setBusy(false);
+        return;
+      }
     }
 
     const target = await injectScanner();
@@ -510,7 +525,7 @@ export function App(): ReactNode {
      * field came from, only what happened to it.
      */
     const byFrame = new Map<number, ResolvedFieldAction[]>();
-    for (const action of requested) {
+    for (const action of toFill) {
       const frameId =
         state.kind === 'scanned' ? (state.frameByLocalId[action.localId] ?? 0) : 0;
       const existing = byFrame.get(frameId);
@@ -560,12 +575,20 @@ export function App(): ReactNode {
 
     // The summary states the failures out loud. A count that silently omits
     // them is the same lie as the old "Filled" badge, just smaller.
+    //
+    // The missing-resume note is appended rather than replaced: it is the one
+    // thing on this screen the user can act on immediately, and a "12 fields
+    // filled" line that scrolls it away hides the reason their resume is not
+    // attached.
+    const resumeNote =
+      needsResume && resume === undefined ? ' No resume was attached - none is saved.' : '';
+
     setStatus({
-      kind: failed === 0 ? 'ok' : 'error',
+      kind: failed === 0 && resumeNote === '' ? 'ok' : 'error',
       message:
-        failed === 0
+        (failed === 0
           ? `${verified} field${verified === 1 ? '' : 's'} filled and verified.`
-          : `${verified} filled, ${failed} could not be filled - see below.`,
+          : `${verified} filled, ${failed} could not be filled - see below.`) + resumeNote,
     });
   }
 
@@ -757,14 +780,22 @@ function ScanError({
     })();
 
     return (
-      <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
-        <p className="font-medium">Allow this extension on {host}?</p>
-        <p className="text-zinc-600 dark:text-zinc-400">
+      <div className="panel-card overflow-hidden p-4">
+        <div className="mb-3 flex items-start gap-3">
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-[--app-warning]">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v4M5.6 5.6l2.8 2.8M3 12h4M18.4 5.6l-2.8 2.8" /><path d="M8 16a4 4 0 1 1 8 0v2H8z" /></svg>
+          </span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-warning]">Permission needed</p>
+            <p className="mt-1 font-semibold tracking-[-0.015em] text-[--app-text]">Allow access to {host}?</p>
+          </div>
+        </div>
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           The extension asks for no site access when you install it, so it has none here yet.
           Allowing {host} lets it read this form. It does not grant access to any other site, and
           you can undo it from Chrome&apos;s extension settings at any time.
         </p>
-        <div className="flex gap-2">
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
           <Button
             onClick={() => {
               void (async () => {
@@ -785,21 +816,35 @@ function ScanError({
   }
   if (code === 'PROFILE_NOT_FOUND') {
     return (
-      <div className="space-y-3 rounded border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
-        <p className="font-medium">Set up your profile first</p>
-        <p className="text-zinc-600 dark:text-zinc-400">
+      <div className="panel-card overflow-hidden p-4">
+        <div className="mb-3 flex items-start gap-3">
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-[--app-accent]">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" /></svg>
+          </span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-accent]">One-time setup</p>
+            <p className="mt-1 font-semibold tracking-[-0.015em] text-[--app-text]">Build your application profile</p>
+          </div>
+        </div>
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           The extension has nothing to fill this form with yet. Add your details - or import a
           resume - and it will take about two minutes, once.
         </p>
-        <Button onClick={() => void chrome.runtime.openOptionsPage()}>Open my profile</Button>
+        <Button className="mt-4 w-full" onClick={() => void chrome.runtime.openOptionsPage()}>Open my profile</Button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <StatusLine status={{ kind: 'error', message }} />
-      <Button variant="secondary" onClick={() => void onRetry()} disabled={busy}>
+    <div className="panel-card p-4">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-red-500/20 bg-red-500/10 text-[--app-danger]">!</span>
+        <div className="min-w-0">
+          <p className="font-semibold text-[--app-text]">We couldn’t read this page</p>
+          <p className="mt-1 text-xs leading-relaxed text-[--app-muted]">{message}</p>
+        </div>
+      </div>
+      <Button className="mt-4 w-full" variant="secondary" onClick={() => void onRetry()} disabled={busy}>
         Try again
       </Button>
     </div>
@@ -845,13 +890,16 @@ function ScanReport({
 
   if (actions.length === 0) {
     return (
-      <div className="space-y-3">
-        <p className="text-zinc-600 dark:text-zinc-400">
+      <div className="panel-card p-5 text-center">
+        <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-xl border border-[--app-border] bg-[--app-panel-soft] text-[--app-muted]">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3" /><path d="M9 12h6" /></svg>
+        </span>
+        <p className="text-xs leading-relaxed text-[--app-muted]">
           {fieldsDetected === 0
             ? 'No application form detected on this page.'
             : `${fieldsDetected} fields found, but none of them matched anything in your profile.`}
         </p>
-        <Button variant="secondary" onClick={onRescan} disabled={busy}>
+        <Button className="mt-4 w-full" variant="secondary" onClick={onRescan} disabled={busy}>
           Scan again
         </Button>
       </div>
@@ -862,8 +910,16 @@ function ScanReport({
   const failedCount = Object.values(outcomes).length - verifiedCount;
 
   return (
-    <div className="space-y-4">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+    <div className="space-y-3.5">
+      <div className="flex items-end justify-between gap-3 px-0.5">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-accent]">Application map</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-[-0.035em] text-[--app-text]">Your review queue</h2>
+        </div>
+        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2 py-1 text-[10px] font-semibold text-[--app-success]">Scan complete</span>
+      </div>
+
+      <dl className="metric-grid">
         <Stat label="Fields detected" value={fieldsDetected} />
         <Stat label="Ready to fill" value={ready.length} />
         <Stat label="Need review" value={review.length} />
@@ -877,21 +933,22 @@ function ScanReport({
         )}
       </dl>
 
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={() => onFill(remainingReady)} disabled={busy || remainingReady.length === 0}>
+      <div className="panel-card p-3">
+        <Button className="w-full" onClick={() => onFill(remainingReady)} disabled={busy || remainingReady.length === 0}>
           {remainingReady.length === 0 && attempted(ready).length > 0
             ? 'Safe fields done'
             : `Fill ${remainingReady.length} safe field${remainingReady.length === 1 ? '' : 's'}`}
         </Button>
-        <Button variant="secondary" onClick={onRescan} disabled={busy}>
+        <Button className="mt-2 w-full" variant="ghost" onClick={onRescan} disabled={busy}>
           Rescan
         </Button>
       </div>
 
       {/* The form is never submitted for the user. Saying so plainly is part of
           the product: it is why they can let it fill without watching. */}
-      <p className="text-xs text-zinc-500">
-        This extension never submits an application. Review everything before you do.
+      <p className="flex items-start gap-2 px-1 text-[10px] leading-relaxed text-[--app-muted]">
+        <svg className="mt-px flex-none text-[--app-teal]" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8 7 10 4.2-2 7-5.4 7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>
+        <span>This extension never submits an application. Review everything before you do.</span>
       </p>
 
       {review.length > 0 && (
@@ -940,10 +997,10 @@ function ScanReport({
 
 function Stat({ label, value }: { label: string; value: number }): ReactNode {
   return (
-    <>
-      <dt className="text-zinc-500">{label}</dt>
-      <dd className="text-right font-medium">{value}</dd>
-    </>
+    <div className="metric-card">
+      <dt className="metric-label">{label}</dt>
+      <dd className="metric-value">{value}</dd>
+    </div>
   );
 }
 
@@ -969,25 +1026,26 @@ function ActionGroup({
   const [open, setOpen] = useState(!collapsed);
 
   return (
-    <section>
+    <section className="action-card overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="mb-1 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-zinc-500"
+        className="flex w-full items-center justify-between px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted] transition hover:bg-[--app-panel]"
         aria-expanded={open}
       >
         <span>
           {title} ({actions.length})
         </span>
-        <span aria-hidden="true">{open ? '−' : '+'}</span>
+        <span className="grid h-5 w-5 place-items-center rounded-md bg-[--app-panel] text-sm font-medium text-[--app-accent]" aria-hidden="true">{open ? '−' : '+'}</span>
       </button>
 
       {open && (
         <>
           {bulkAction !== undefined && bulkAction.actions.length > 0 && (
-            <div className="mb-2">
+            <div className="border-t border-[--app-border] px-3 py-2.5">
               <Button
                 variant="secondary"
+                className="w-full"
                 onClick={() =>
                   // Wrapped rather than passed by reference: `map` supplies the
                   // index as a second argument, which would arrive as the
@@ -1000,7 +1058,7 @@ function ActionGroup({
               </Button>
             </div>
           )}
-          <ul className="space-y-1">
+          <ul className="border-t border-[--app-border]">
             {actions.map((action) => (
               <ActionRow
                 key={action.localId}
@@ -1080,30 +1138,30 @@ function ActionRow({
   const canEditValue = canAccept && action.optionValue === undefined && action.value !== undefined;
 
   return (
-    <li className="text-xs">
-      <div className="flex items-start gap-2">
+    <li className="border-b border-[--app-border] px-3 py-3 text-xs last:border-b-0">
+      <div className="flex items-start gap-2.5">
         <StateBadge state={state} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{action.explanation ?? 'Field'}</span>
+          <span className="block truncate font-medium text-[--app-text]">{action.explanation ?? 'Field'}</span>
           {action.value !== undefined && (
-            <span className="block truncate font-mono text-zinc-500">{String(action.value)}</span>
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-[--app-muted]">{String(action.value)}</span>
           )}
           {/* The failure REASON, in the row that failed. A user who is told
               only "2 could not be filled" has to guess which two. */}
           {outcome !== undefined && !outcome.verified && (
-            <span className="block text-amber-700 dark:text-amber-500">
+            <span className="mt-1 block text-[10px] leading-snug text-[--app-warning]">
               {describeFillFailure(outcome.failureReason)}
             </span>
           )}
         </span>
 
-        <div className="flex shrink-0 flex-col items-end gap-0.5">
+        <div className="flex shrink-0 flex-col items-end gap-1">
           {canAccept && (
             <button
               type="button"
               onClick={() => onFill([asAcceptedFill(action)])}
               disabled={busy}
-              className="text-blue-600 hover:underline disabled:opacity-50"
+              className="rounded-md bg-indigo-500/10 px-2 py-1 text-[10px] font-semibold text-[--app-accent] transition hover:bg-indigo-500/15 disabled:opacity-50"
             >
               Fill this
             </button>
@@ -1111,7 +1169,7 @@ function ActionRow({
           <button
             type="button"
             onClick={() => setEditing((current) => !current)}
-            className="text-blue-600 hover:underline"
+            className="px-1 py-0.5 text-[10px] font-semibold text-[--app-muted] transition hover:text-[--app-text]"
             aria-expanded={editing}
           >
             {editing ? 'Cancel' : 'Change'}
@@ -1120,16 +1178,16 @@ function ActionRow({
       </div>
 
       {editing && (
-        <div className="mt-2 space-y-2 rounded border border-zinc-200 p-2 dark:border-zinc-700">
+        <div className="mt-3 space-y-3 rounded-xl border border-[--app-border] bg-[--app-panel] p-3">
           {canEditValue && (
             <label className="block">
-              <span className="mb-1 block text-zinc-500">Use this value</span>
+              <span className="mb-1.5 block font-medium text-[--app-muted]">Use this value</span>
               <div className="flex gap-1">
                 <input
                   type="text"
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+                  className="min-w-0 flex-1 rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-1.5 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
                 />
                 <Button
                   onClick={() => {
@@ -1175,6 +1233,9 @@ function rowState(action: ResolvedFieldAction, outcome: FieldFillReport | undefi
   return 'missing';
 }
 
+/** The group holding the profile's non-repeating fields. */
+const SCALAR_GROUP = 'Your details';
+
 /** One choice in the correction dropdown, grouped for readability. */
 interface PathChoice {
   group: string;
@@ -1197,7 +1258,7 @@ interface PathChoice {
 function useCorrectablePaths(): PathChoice[] {
   const [choices, setChoices] = useState<PathChoice[]>(() =>
     SCALAR_PROFILE_PATHS.map((path) => ({
-      group: 'Your details',
+      group: SCALAR_GROUP,
       value: path,
       label: labelForPath(path),
     })),
@@ -1237,7 +1298,20 @@ function useCorrectablePaths(): PathChoice[] {
       }
 
       if (entryChoices.length > 0) {
-        setChoices((current) => [...current, ...entryChoices]);
+        /**
+         * REPLACED, not appended.
+         *
+         * Under React's StrictMode - which the panel mounts with - an effect
+         * runs twice on mount in development. Appending therefore produced two
+         * copies of every education and employment option, with duplicate
+         * React keys, in a dropdown whose whole job is to be unambiguous.
+         * Rebuilding from the scalar list is idempotent however many times it
+         * runs.
+         */
+        setChoices((current) => [
+          ...current.filter((choice) => choice.group === SCALAR_GROUP),
+          ...entryChoices,
+        ]);
       }
     })();
   }, []);
@@ -1290,11 +1364,11 @@ function CorrectionPicker({
   return (
     <div className="space-y-2">
       <label className="block">
-        <span className="mb-1 block text-zinc-500">This question is asking for</span>
+        <span className="mb-1.5 block font-medium text-[--app-muted]">This question is asking for</span>
         <select
           value={path}
           onChange={(event) => setPath(event.target.value)}
-          className="w-full rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+          className="w-full rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-2 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
         >
           {/* "Nothing" is a real, useful answer: it teaches the extension to
               stop offering this field, which is itself a correction worth
@@ -1313,11 +1387,11 @@ function CorrectionPicker({
       </label>
 
       <label className="block">
-        <span className="mb-1 block text-zinc-500">Remember this</span>
+        <span className="mb-1.5 block font-medium text-[--app-muted]">Remember this</span>
         <select
           value={scope}
           onChange={(event) => setScope(event.target.value as MappingScope)}
-          className="w-full rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+          className="w-full rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-2 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
         >
           {SCOPE_LABELS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -1327,7 +1401,7 @@ function CorrectionPicker({
         </select>
       </label>
 
-      <Button onClick={() => onSubmit(path.length === 0 ? null : path, scope)}>Save</Button>
+      <Button className="w-full" onClick={() => onSubmit(path.length === 0 ? null : path, scope)}>Save correction</Button>
     </div>
   );
 }

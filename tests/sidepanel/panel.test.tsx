@@ -160,6 +160,35 @@ describe('side panel - reporting what happened', () => {
   });
 });
 
+describe('side panel - a resume the user has not saved', () => {
+  it('says so, and does not send an attach action that can only fail', async () => {
+    await scanWith([
+      action({ localId: 'f_1' }),
+      action({ localId: 'f_9', action: 'attach_resume', profilePath: null, explanation: 'Resume upload' }),
+    ]);
+
+    reply('CONTENT_FILL', {
+      ok: true,
+      outcomes: [{ localId: 'f_1', attempted: true, verified: true }],
+    });
+
+    click(/fill 2 safe fields/i);
+
+    const fill = await waitFor(() => {
+      const found = sent.find((entry) => entry.message['type'] === 'CONTENT_FILL');
+      expect(found).toBeDefined();
+      return found;
+    });
+
+    // The attach action is dropped rather than sent to fail: nothing is stored
+    // for it to attach, and reporting that as a rejected field would blame the
+    // page for something the user fixes in the options screen.
+    const actions = fill?.message['actions'] as ResolvedFieldAction[];
+    expect(actions.map((candidate) => candidate.localId)).toEqual(['f_1']);
+    await screen.findByText(/no resume/i);
+  });
+});
+
 describe('side panel - accepting a suggestion', () => {
   it('sends the suggestion as a fill the user authorised', async () => {
     const suggestion = action({
@@ -234,7 +263,10 @@ describe('side panel - a missing profile', () => {
     render(<App />);
     click(/scan this page/i);
 
-    await screen.findByText(/set up your profile first/i);
+    // Asserted on the AFFORDANCE, not the wording: the copy is presentation
+    // and gets rewritten, but "there is a one-click way into onboarding, and
+    // the page is not blamed" is the behaviour that must not regress.
+    await screen.findByRole('button', { name: /open my profile/i });
     expect(screen.queryByText(/no application form detected/i)).toBeNull();
 
     click(/open my profile/i);

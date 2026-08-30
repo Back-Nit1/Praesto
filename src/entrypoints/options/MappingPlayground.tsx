@@ -166,21 +166,27 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
   const { mapping, signature, resolution, decision } = analysis;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
       {/* --- inputs -------------------------------------------------------- */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-1">
+      <div className="surface-card space-y-4 p-5">
+        <div>
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-accent]">Field signals</div>
+          <h2 className="text-base font-semibold tracking-[-0.02em] text-[--app-text]">Describe a form control</h2>
+          <p className="mt-1 text-xs leading-relaxed text-[--app-muted]">Start with an example or enter the attributes you see on a real application.</p>
+        </div>
+        <div className="soft-divider" />
+        <div className="flex flex-wrap gap-1.5">
           {PRESETS.map((preset) => (
             <button
               key={preset.title}
               type="button"
               onClick={() => setInputs({ ...EMPTY_INPUTS, ...preset.inputs })}
-              className="rounded bg-zinc-100 px-2 py-1 text-xs hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+              className="rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2.5 py-1.5 text-[11px] font-medium text-[--app-muted] transition hover:border-[--app-border-strong] hover:bg-[--app-panel] hover:text-[--app-text]"
             >
               {preset.title}
             </button>
           ))}
-          <Button variant="secondary" onClick={() => setInputs(EMPTY_INPUTS)}>
+          <Button className="!min-h-7 !rounded-lg !px-2.5 !py-1 !text-[11px]" variant="ghost" onClick={() => setInputs(EMPTY_INPUTS)}>
             Clear
           </Button>
         </div>
@@ -205,11 +211,11 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
         />
 
         <label className="block">
-          <span className="mb-1 block text-sm text-zinc-700 dark:text-zinc-300">Control type</span>
+          <span className="mb-1.5 block text-xs font-semibold text-[--app-text]">Control type</span>
           <select
             value={inputs.kind}
             onChange={(event) => update({ kind: event.target.value as ControlKind })}
-            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+            className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
           >
             {CONTROL_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -220,25 +226,39 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm text-zinc-700 dark:text-zinc-300">
+          <span className="mb-1.5 block text-xs font-semibold text-[--app-text]">
             Options (one per line)
           </span>
           <textarea
             value={inputs.optionsText}
             onChange={(event) => update({ optionsText: event.target.value })}
             rows={4}
-            className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-zinc-600 dark:bg-zinc-800"
+            className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
           />
         </label>
       </div>
 
       {/* --- output -------------------------------------------------------- */}
-      <div className="space-y-3 rounded border border-zinc-200 p-4 text-sm dark:border-zinc-700">
+      <div className="surface-card sticky top-5 space-y-4 overflow-hidden p-5 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-teal]">Live interpretation</div>
+            <h2 className="text-base font-semibold tracking-[-0.02em] text-[--app-text]">What the agent sees</h2>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+            decision === 'autofill'
+              ? 'border-emerald-500/20 bg-emerald-500/10 text-[--app-success]'
+              : decision === 'suggest'
+                ? 'border-amber-500/20 bg-amber-500/10 text-[--app-warning]'
+                : 'border-zinc-500/15 bg-zinc-500/8 text-[--app-muted]'
+          }`}>{decision}</span>
+        </div>
+        <div className="soft-divider" />
         <Row label="Predicted">
           {mapping.profilePath === null ? (
-            <span className="text-zinc-500">unknown - the engine would leave this field alone</span>
+            <span className="text-[--app-muted]">unknown — the engine would leave this field alone</span>
           ) : (
-            <span className="font-mono">{mapping.profilePath}</span>
+            <span className="rounded-md bg-indigo-500/8 px-1.5 py-1 font-mono text-xs text-[--app-accent]">{mapping.profilePath}</span>
           )}
         </Row>
 
@@ -254,10 +274,10 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
           <span
             className={
               decision === 'autofill'
-                ? 'text-green-600'
+                ? 'font-semibold text-[--app-success]'
                 : decision === 'suggest'
-                  ? 'text-amber-600'
-                  : 'text-zinc-500'
+                  ? 'font-semibold text-[--app-warning]'
+                  : 'text-[--app-muted]'
             }
           >
             {decision}
@@ -266,21 +286,21 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
 
         <Row label="Resolved value">
           {resolution === undefined ? (
-            <span className="text-zinc-500">no profile loaded</span>
+            <span className="text-[--app-muted]">no profile loaded</span>
           ) : resolution.ok ? (
             <span className="font-mono">{String(resolution.resolved.value)}</span>
           ) : (
-            <span className="text-zinc-500">{resolution.reason}</span>
+            <span className="text-[--app-muted]">{resolution.reason}</span>
           )}
         </Row>
 
-        <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <div className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted]">
             Reasons
           </div>
           <ul className="space-y-1">
             {mapping.reasons.map((reason, index) => (
-              <li key={index} className="font-mono text-xs">
+              <li key={index} className="font-mono text-[11px] leading-relaxed text-[--app-text]">
                 {reason.signal}
                 {reason.matched !== undefined && ` -> "${reason.matched}"`}
                 {reason.score !== undefined && ` (${reason.score.toFixed(3)})`}
@@ -291,13 +311,13 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
         </div>
 
         {mapping.alternatives !== undefined && mapping.alternatives.length > 0 && (
-          <div>
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <div className="rounded-xl border border-amber-500/15 bg-amber-500/5 p-3">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-warning]">
               Competing interpretations
             </div>
             <ul className="space-y-1">
               {mapping.alternatives.map((alternative) => (
-                <li key={alternative.profilePath} className="font-mono text-xs text-amber-600">
+                <li key={alternative.profilePath} className="font-mono text-[11px] text-[--app-warning]">
                   {alternative.profilePath} ({alternative.confidence.toFixed(3)})
                 </li>
               ))}
@@ -305,14 +325,14 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
           </div>
         )}
 
-        <div>
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <div className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted]">
             Semantic fingerprint
           </div>
           {/* Shown because a learned mapping is keyed on this. When a correction
               fails to carry over between two pages, the first thing to check is
               whether their fingerprints actually match. */}
-          <div className="font-mono text-xs">
+          <div className="space-y-1 break-all font-mono text-[10px] leading-relaxed text-[--app-muted]">
             <div>hash: {analysis.descriptor.semanticFingerprint}</div>
             <div>question: {signature.question || '(none)'}</div>
             <div>kind: {signature.kind}</div>
@@ -335,12 +355,12 @@ function PlaygroundInput({
 }): ReactNode {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm text-zinc-700 dark:text-zinc-300">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold text-[--app-text]">{label}</span>
       <input
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-zinc-600 dark:bg-zinc-800"
+        className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
       />
     </label>
   );
@@ -348,9 +368,9 @@ function PlaygroundInput({
 
 function Row({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
-    <div className="flex gap-3">
-      <span className="w-36 shrink-0 text-xs uppercase tracking-wide text-zinc-500">{label}</span>
-      <span className="min-w-0 break-words">{children}</span>
+    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3">
+      <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[--app-muted]">{label}</span>
+      <span className="min-w-0 break-words text-[--app-text]">{children}</span>
     </div>
   );
 }

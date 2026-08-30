@@ -116,6 +116,36 @@ describe('mapField - section context resolves the collisions', () => {
   });
 });
 
+describe('mapField - generic words need the section to mean an entry', () => {
+  it('does not read a bare "Location" as a past employer\'s office', () => {
+    // The wrong fill this prevents: writing a previous employer's city into a
+    // Lever form's "Location" question, which asks where the APPLICANT lives.
+    const result = mapField(descriptor({ label: 'Location' }));
+    expect(result.profilePath).not.toBe('employment[0].location');
+  });
+
+  it('does read it that way inside a labelled work-experience block', () => {
+    const result = mapField(
+      descriptor({ label: 'Location', sectionHeading: 'Work experience' }),
+    );
+    expect(result.profilePath).toBe('employment[0].location');
+  });
+
+  it('does not read a bare "Role" as a previous job title', () => {
+    // On an application, "Role" is usually the role being applied for.
+    const result = mapField(descriptor({ label: 'Role' }));
+    expect(result.profilePath).not.toBe('employment[0].title');
+  });
+
+  it('keeps an unambiguous alias working without any section', () => {
+    // The rule is about generic English words, not about repeated entities:
+    // "Job title" says what it means on its own and must still fill.
+    const result = mapField(descriptor({ label: 'Job title' }));
+    expect(result.profilePath).toBe('employment[0].title');
+    expect(result.confidence).toBeGreaterThanOrEqual(AUTOFILL);
+  });
+});
+
 describe('mapField - repeated-entity fields still refuse to guess', () => {
   it('scores a match on a truncated attribute below the autofill line', () => {
     // "previous_employer_company" truncating to "company" must not be able to

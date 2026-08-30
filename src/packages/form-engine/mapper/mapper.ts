@@ -60,6 +60,7 @@ import {
   COLLECTION_ALIAS_INDEX,
   COMPACT_ALIAS_INDEX,
   COMPACT_COLLECTION_ALIAS_INDEX,
+  SECTION_ONLY_COLLECTION_ALIASES,
   collectionFromContext,
   type CollectionAliasEntry,
   type ProfileCollection,
@@ -435,6 +436,13 @@ function pushCollectionCandidates(
   const selected = confirmed === null ? claimed : claimed.filter((c) => c.entry.collection === confirmed);
 
   for (const claim of selected) {
+    /**
+     * A generic word that only means a repeated-entity field inside a labelled
+     * block. "Location" on its own is where the applicant lives; only a "Work
+     * experience" heading makes it a past employer's office.
+     */
+    if (confirmed === null && SECTION_ONLY_COLLECTION_ALIASES.has(claim.matched)) continue;
+
     const index = indexes[claim.entry.collection];
     const path = `${claim.entry.collection}[${index}].${claim.entry.field}`;
     // Guards a typo in an alias table: a field name that is not in the path

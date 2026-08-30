@@ -76,26 +76,45 @@ export function LearnedRules(): ReactNode {
     await load();
   }
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading...</p>;
+  if (loading) {
+    return (
+      <div className="surface-card grid min-h-48 place-items-center p-8 text-center">
+        <div>
+          <div className="scan-orbit !my-0 !mb-3 !h-12 !w-12" aria-hidden="true" />
+          <p className="text-sm text-[--app-muted]">Opening personal memory…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (rules.length === 0) {
     return (
-      <div className="max-w-2xl space-y-2">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Nothing learned yet. When you correct a field in the side panel, the correction is
-          recorded here and used on future applications.
-        </p>
+      <div className="surface-card grid min-h-64 max-w-3xl place-items-center p-8 text-center">
+        <div className="max-w-md">
+          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[--app-accent-soft] text-[--app-accent]">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5a6 6 0 0 0-3.8 10.6c.8.7 1.3 1.5 1.3 2.4h5c0-.9.5-1.7 1.3-2.4A6 6 0 0 0 12 3.5Z" /><path d="M9.7 20h4.6M10 17h4" /></svg>
+          </span>
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-[--app-text]">No corrections yet</h2>
+          <p className="mt-2 text-sm leading-relaxed text-[--app-muted]">
+            When you correct a field in the side panel, the agent records it here and uses it on future applications.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+    <div className="space-y-4">
+      <div className="surface-card flex items-center justify-between gap-5 p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 flex-none place-items-center rounded-xl border border-indigo-500/20 bg-[--app-accent-soft] text-[--app-accent]">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5a6 6 0 0 0-3.8 10.6c.8.7 1.3 1.5 1.3 2.4h5c0-.9.5-1.7 1.3-2.4A6 6 0 0 0 12 3.5Z" /><path d="M9.7 20h4.6M10 17h4" /></svg>
+          </span>
+          <p className="max-w-2xl text-sm leading-relaxed text-[--app-muted]">
           {rules.length} rule{rules.length === 1 ? '' : 's'} learned from your corrections. Delete
           any that are wrong — the extension will fall back to its normal behaviour for that field.
-        </p>
+          </p>
+        </div>
         <Button variant="danger" onClick={handleClear}>
           Delete all
         </Button>
@@ -103,59 +122,60 @@ export function LearnedRules(): ReactNode {
 
       <StatusLine status={status} />
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs uppercase tracking-wide text-zinc-500">
+      <div className="surface-card overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left text-sm">
+        <thead className="bg-[--app-panel-soft] text-[10px] uppercase tracking-[0.12em] text-[--app-muted]">
           <tr>
-            <th className="py-2">Question</th>
-            <th className="py-2">Means</th>
-            <th className="py-2">Applies</th>
-            <th className="py-2 text-right">Track record</th>
-            <th className="py-2" />
+            <th className="px-4 py-3">Question</th>
+            <th className="px-4 py-3">Means</th>
+            <th className="px-4 py-3">Applies</th>
+            <th className="px-4 py-3 text-right">Track record</th>
+            <th className="px-4 py-3" />
           </tr>
         </thead>
         <tbody>
           {rules.map((rule) => (
-            <tr key={rule.id} className="border-t border-zinc-200 dark:border-zinc-700">
-              <td className="py-2 pr-3">
-                <span className={isRetired(rule) ? 'text-zinc-400 line-through' : ''}>
+            <tr key={rule.id} className="border-t border-[--app-border] transition hover:bg-[--app-panel-soft]">
+              <td className="px-4 py-3.5">
+                <span className={isRetired(rule) ? 'text-[--app-faint] line-through' : 'font-medium text-[--app-text]'}>
                   {rule.normalizedLabel ?? <span className="font-mono text-xs">{rule.semanticFingerprint}</span>}
                 </span>
                 {isRetired(rule) && (
                   // A retired rule is kept and shown rather than deleted, so the
                   // user can see the system noticed it was wrong and stopped
                   // using it. Silently dropping it would look like amnesia.
-                  <span className="ml-2 rounded bg-zinc-200 px-1 text-xs dark:bg-zinc-700">
+                  <span className="ml-2 rounded-full bg-zinc-500/10 px-2 py-1 text-[10px] text-[--app-muted]">
                     stopped using
                   </span>
                 )}
               </td>
-              <td className="py-2 pr-3">
+              <td className="px-4 py-3.5 text-[--app-text]">
                 {rule.profilePath.length === 0 ? (
-                  <span className="text-zinc-500">nothing (leave alone)</span>
+                  <span className="text-[--app-muted]">nothing (leave alone)</span>
                 ) : (
                   labelForPath(rule.profilePath)
                 )}
               </td>
-              <td className="py-2 pr-3 text-zinc-500">
+              <td className="px-4 py-3.5 text-[--app-muted]">
                 {SCOPE_LABELS[rule.scope]}
                 {rule.hostname !== undefined && (
                   <span className="block text-xs">{rule.hostname}</span>
                 )}
               </td>
-              <td className="py-2 pr-3 text-right text-zinc-500">
+              <td className="px-4 py-3.5 text-right text-[--app-muted]">
                 {/* Both counts, always. Showing only successes would flatter the
                     system; the corrections are what tell the user whether a rule
                     is actually working for them. */}
-                <span className="text-green-600">{rule.successfulUses} used</span>
+                <span className="text-[--app-success]">{rule.successfulUses} used</span>
                 {rule.correctedUses > 0 && (
-                  <span className="ml-2 text-amber-600">{rule.correctedUses} corrected</span>
+                  <span className="ml-2 text-[--app-warning]">{rule.correctedUses} corrected</span>
                 )}
               </td>
-              <td className="py-2 text-right">
+              <td className="px-4 py-3.5 text-right">
                 <button
                   type="button"
                   onClick={() => void handleDelete(rule.id)}
-                  className="text-xs text-red-600 hover:underline"
+                  className="rounded-lg px-2 py-1 text-xs font-semibold text-[--app-danger] transition hover:bg-red-500/10"
                 >
                   Delete
                 </button>
@@ -164,6 +184,7 @@ export function LearnedRules(): ReactNode {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

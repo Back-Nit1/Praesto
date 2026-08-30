@@ -418,6 +418,41 @@ export const COMPACT_COLLECTION_ALIAS_INDEX: ReadonlyMap<string, readonly Collec
   buildCompactCollectionIndex();
 
 /**
+ * Repeated-entity aliases that mean nothing WITHOUT a section heading.
+ *
+ * These are ordinary English words that a repeated block happens to use, and
+ * that an application form uses to ask about the applicant instead:
+ *
+ *     "Location"     where the applicant lives - not a past employer's office
+ *     "City"         same
+ *     "Role"         the role being applied for - not a previous job title
+ *     "Description"  a free-text question - not last year's job description
+ *     "From" / "To"  any date range on the page
+ *
+ * Without this list, "Location" on a Lever form mapped to
+ * `employment[0].location` with enough confidence to FILL - writing a previous
+ * employer's city into a question about where the applicant lives. That is a
+ * confidently wrong answer, which the product exists to avoid, and no amount
+ * of scoring fixes it: the alias is simply not evidence on its own.
+ *
+ * Inside a block the form has labelled ("Work experience"), the same words are
+ * unambiguous, so they are kept and used - just never on their own authority.
+ */
+export const SECTION_ONLY_COLLECTION_ALIASES: ReadonlySet<string> = new Set([
+  'location',
+  'city',
+  'title',
+  'role',
+  'position',
+  'description',
+  'summary',
+  'from',
+  'to',
+  'present',
+  'grade',
+]);
+
+/**
  * Which repeated block a piece of page context is talking about.
  *
  * This is the signal that disambiguates the collisions above, and it is the
