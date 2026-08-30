@@ -57,7 +57,14 @@ export function normalizeLabel(input: string | null | undefined): string {
       // Remaining punctuation becomes a space rather than being deleted, so
       // "e-mail" -> "e mail" rather than "email". Which of those is right is
       // handled explicitly below, where we can be deliberate about it.
-      .replace(/[:;,.?!"'`|\\/_\[\]{}()<>+#@]/g, ' ')
+      //
+      // The hyphen is in this class deliberately. Deleting it instead would
+      // make "e-mail" collapse to "email" here, and then "state-province"
+      // would collapse to "stateprovince" - joining two words that were never
+      // one. Splitting is the transformation that is always safe; joining is
+      // handled separately by `normalizeCompact`, which is scored lower
+      // precisely because it is lossy.
+      .replace(/[-:;,.?!"'`|\\/_\[\]{}()<>+#@]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
   );
@@ -104,6 +111,81 @@ export function normalizeAttributeName(input: string | null | undefined): string
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+/**
+ * Every reading of an attribute name that is worth matching against.
+ *
+ * Real ATS markup namespaces its inputs, and the namespace is noise:
+ *
+ *     job_application[first_name]        (Greenhouse / Rails)
+ *     candidate.profile.emailAddress     (dotted namespace)
+ *     application[answers][2][value]     (nested Rails arrays)
+ *
+ * Matching only the whole string means `job_application[email]` never reaches
+ * the "email" alias, because "job application email" is not an alias and never
+ * should be - adding it would mean adding a namespaced variant of every alias
+ * for every ATS, which is unmaintainable.
+ *
+ * Instead we produce the readings the string could have and let the mapper try
+ * each. Returned most-faithful-first so the caller can prefer the full string
+ * when it matches. Duplicates are removed, so a name with no namespace costs
+ * exactly one lookup.
+ *
+ * This only ever ADDS candidate strings; it never rewrites the field's meaning.
+ * A namespace segment that happens to be a real alias (a field literally named
+ * `email[something]`) still contributes the full reading too.
+ */
+export interface AttributeNameVariant {
+  /** The normalized reading. */
+  text: string;
+  /**
+   * How the reading was obtained, which determines how much it is worth:
+   *
+   *   full     the entire attribute. The most faithful reading.
+   *   segment  content the author explicitly delimited with brackets or dots.
+   *            Nearly as trustworthy as `full`: the author drew the boundary,
+   *            we only read inside it.
+   *   suffix   the trailing word(s), where there was no delimiter to use.
+   *            A GUESS, and scored well below the others, because dropping a
+   *            prefix can invert meaning: `emergency_contact_phone_number`
+   *            truncates to "phone number", which is emphatically not the
+   *            applicant's phone number.
+   */
+  kind: 'full' | 'segment' | 'suffix';
+}
+
+export function attributeNameVariants(input: string | null | undefined): AttributeNameVariant[] {
+  const full = normalizeAttributeName(input);
+  if (full.length === 0) return [];
+
+  const variants: AttributeNameVariant[] = [{ text: full, kind: 'full' }];
+  const seen = new Set([full]);
+
+  const add = (text: string, kind: AttributeNameVariant['kind']): void => {
+    if (text.length === 0 || seen.has(text)) return;
+    seen.add(text);
+    variants.push({ text, kind });
+  };
+
+  if (input !== null && input !== undefined) {
+    // Innermost bracketed group: "application[answers][value]" -> "value".
+    const bracketed = [...input.matchAll(/\[([^\][]+)\]/g)];
+    const lastBracket = bracketed[bracketed.length - 1]?.[1];
+    if (lastBracket !== undefined) add(normalizeAttributeName(lastBracket), 'segment');
+
+    // Last dotted segment: "candidate.profile.emailAddress" -> "email address".
+    if (input.includes('.')) add(normalizeAttributeName(input.split('.').pop()), 'segment');
+  }
+
+  // Trailing words, for underscore namespacing with no bracket or dot to split
+  // on ("job_application_email"). Deliberately last and deliberately cheap.
+  const words = full.split(' ');
+  for (const take of [2, 1]) {
+    if (words.length > take) add(words.slice(-take).join(' '), 'suffix');
+  }
+
+  return variants;
 }
 
 /**

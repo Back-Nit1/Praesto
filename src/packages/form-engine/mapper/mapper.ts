@@ -44,6 +44,7 @@ import {
   type ConfidencePolicyConfig,
 } from '../confidence/policy';
 import {
+  attributeNameVariants,
   containmentScore,
   containsNegation,
   normalizeAttributeName,
@@ -185,16 +186,19 @@ export function mapField(
   // --- 5. Exact alias match on the name/id attributes ----------------------
   // Slightly below the label match: attributes are written for machines and are
   // more often abbreviated, reused across templates, or simply stale.
+  //
+  // Each attribute yields several readings, because real ATS markup namespaces
+  // its inputs (`job_application[email]`). A reading the author explicitly
+  // delimited scores like any other attribute match; a reading we produced by
+  // truncating scores far lower, since dropping a prefix can invert meaning.
   for (const attribute of [descriptor.name, descriptor.id]) {
-    const normalized = normalizeAttributeName(attribute);
-    if (normalized.length === 0) continue;
-    pushAliasCandidates(
-      normalized,
-      'name_exact',
-      config.sourceScores.nameAttribute,
-      'alias',
-      candidates,
-    );
+    for (const variant of attributeNameVariants(attribute)) {
+      const score =
+        variant.kind === 'suffix'
+          ? config.sourceScores.attributeSuffix
+          : config.sourceScores.nameAttribute;
+      pushAliasCandidates(variant.text, 'name_exact', score, 'alias', candidates);
+    }
   }
 
   // --- 6. Compact match (separators collapsed) -----------------------------
@@ -306,6 +310,16 @@ function bestFuzzyMatch(
 }
 
 /**
+ * How close a rival must be before the mapping counts as contested.
+ *
+ * Sized to sit between adjacent tiers of the source table: an exact label match
+ * (0.97) and an exact name match (0.96) pointing at DIFFERENT paths is a real
+ * disagreement worth flagging, while a fuzzy match (~0.8) losing to an exact one
+ * is simply the cascade working.
+ */
+const CONTEST_MARGIN = 0.05;
+
+/**
  * Pick the winning candidate and compute the final confidence.
  *
  * The selection rules, in order:
@@ -350,8 +364,25 @@ function selectWinner(
   // and pay for it, rather than presenting our first choice as certain.
   const rivals = sorted.filter((c) => c.path !== winner.path);
   const strongestRival = rivals[0];
+
+  // Two winners are immune to the ambiguity penalty, for the same underlying
+  // reason: they are not interpretations competing with other interpretations,
+  // they are declarations.
+  //
+  //   html      the page author stated the field's meaning in a standard
+  //             vocabulary. A generic label like "Name" sitting next to
+  //             `autocomplete="given-name"` is not a rival reading - it is a
+  //             less precise restatement, and the precise one wins.
+  //   override  the user personally told us what this field means.
+  //
+  // Without this, a page that does everything right (a correct autocomplete
+  // attribute AND a human label) would be punished for the label being vaguer
+  // than the attribute - penalising exactly the markup we most want to trust.
+  const winnerIsDeclaration = winner.source === 'html' || winner.override === true;
   const contested =
-    strongestRival !== undefined && strongestRival.score >= winner.score - 0.05 && winner.override !== true;
+    strongestRival !== undefined &&
+    strongestRival.score >= winner.score - CONTEST_MARGIN &&
+    !winnerIsDeclaration;
 
   if (contested && strongestRival !== undefined) {
     reasons.push({

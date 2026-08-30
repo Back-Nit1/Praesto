@@ -76,6 +76,13 @@ export interface ConfidencePolicyConfig {
     readonly atsRule: number;
     readonly exactAlias: number;
     readonly nameAttribute: number;
+    /**
+     * A match on the trailing words of a namespaced attribute, where there was
+     * no delimiter to split on. Below `autofillThreshold` BY CONSTRUCTION:
+     * dropping a prefix can invert meaning, and `emergency_contact_phone`
+     * truncating to "phone" must never be able to fill a field on its own.
+     */
+    readonly attributeSuffix: number;
     readonly learnedMapping: number;
     readonly compactAlias: number;
     readonly fuzzy: number;
@@ -128,6 +135,7 @@ export const DEFAULT_CONFIDENCE_POLICY: ConfidencePolicyConfig = {
     atsRule: 0.98, // a rule we wrote after seeing this exact ATS field
     exactAlias: 0.97, // normalized label matches a known alias exactly
     nameAttribute: 0.96, // name/id matches a known alias exactly
+    attributeSuffix: 0.88, // only the tail of a namespaced name matched - a guess
     learnedMapping: 0.96, // the user personally taught us this one
     compactAlias: 0.9, // matches once separators are collapsed
     fuzzy: 0.82, // token overlap only - BELOW autofillThreshold by design
