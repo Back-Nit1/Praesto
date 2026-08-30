@@ -22,3 +22,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Working notes, not deliverables. Kept out of the repo by request.
+engineering.md
