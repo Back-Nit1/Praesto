@@ -39,7 +39,9 @@ import {
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { runMigrations } from '@storage/migrations';
 import { StoredProfileRepository } from '@profile/repository';
-import { labelForPath } from '@profile/paths';
+import { isProfilePath, labelForPath } from '@profile/paths';
+import { LearnedMappingStore, type LearnedMappingIndex } from '@learning/mapping-memory';
+import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
 import { mapField } from '@form-engine/mapper/mapper';
 import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
@@ -74,6 +76,7 @@ export default defineBackground(() => {
    */
   const store = new ChromeLocalStore();
   const profileRepository = new StoredProfileRepository(store);
+  const learnedMappings = new LearnedMappingStore(store);
 
   /**
    * Storage readiness, tracked per worker instance.
@@ -159,24 +162,65 @@ export default defineBackground(() => {
       case 'RESOLVE_APPLICATION_FIELDS':
         return resolveFields(request);
 
-      case 'REPORT_FILL_RESULTS':
-        // Phase 4 wires this into the audit store. Accepting and logging it now
-        // means the content script's reporting path is exercised from the start
-        // rather than being written blind later.
+      case 'REPORT_FILL_RESULTS': {
+        // A verified fill the user did not change is evidence the rule behind
+        // it was right, so each one nudges that rule's confidence up.
+        //
+        // Note what is NOT done here: a FAILED fill is not counted against a
+        // rule. The mapping may have been perfectly correct and the control
+        // simply undrivable. Only an explicit user correction counts as a miss -
+        // see RECORD_CORRECTION. Conflating "could not fill" with "filled the
+        // wrong thing" would retire good rules for a reason that has nothing to
+        // do with whether they were right.
+        for (const result of request.results) {
+          if (result.verified) void learnedMappings.recordSuccess(result.fingerprints);
+        }
         log.debugLazy(() => [
           `Fill results: ${request.results.filter((r) => r.verified).length}/${request.results.length} verified`,
         ]);
         return { ok: true, type: 'OK' };
+      }
 
       case 'GET_PAGE_STATE':
         return { ok: true, type: 'OK' };
 
-      case 'RECORD_CORRECTION':
-        // Phase 5. The message contract exists now so the side panel can be built
-        // against it, and so the shape is settled before there is stored data in
-        // it to migrate.
-        log.info(`Correction recorded for ${request.profilePath ?? 'none'} at scope ${request.scope}`);
+      case 'RECORD_CORRECTION': {
+        // Reject an unrecognised path BEFORE storing it. A rule pointing at a
+        // path that does not exist would resolve to nothing forever, and the
+        // user would reasonably conclude their correction had been ignored.
+        if (request.profilePath !== null && !isProfilePath(request.profilePath)) {
+          return errorResponse('MESSAGE_INVALID', `Unknown profile field: ${request.profilePath}`);
+        }
+
+        const field = request.field as FieldDescriptor;
+        const fingerprints = computeFingerprints(field);
+
+        // If a rule produced the answer the user is now correcting, mark it as
+        // having missed - which lowers its confidence and, after enough misses,
+        // retires it outright. Done BEFORE the new rule is written, and only
+        // when the target actually changed, so re-confirming a rule does not
+        // penalise it.
+        const previous = (await learnedMappings.index()).find(fingerprints);
+        if (previous !== null && previous.profilePath !== (request.profilePath ?? '')) {
+          await learnedMappings.recordMiss(fingerprints);
+        }
+
+        const question = selectQuestionText(field);
+        const recorded = await learnedMappings.recordCorrection({
+          fingerprints,
+          scope: request.scope,
+          profilePath: request.profilePath,
+          hostname: field.hostname,
+          ats: field.ats,
+          ...(question.length > 0 ? { normalizedLabel: question } : {}),
+          fieldType: field.kind,
+        });
+
+        if (!recorded.ok) return errorResponse(recorded.error.code, recorded.error.message);
+
+        log.info(`Correction stored: ${request.profilePath ?? 'none'} at scope ${request.scope}`);
         return { ok: true, type: 'OK' };
+      }
     }
   }
 
@@ -206,6 +250,12 @@ export default defineBackground(() => {
     }
 
     const profile = loaded.value;
+
+    // Loaded ONCE per batch, not per field. The mapper's lookup is synchronous
+    // by design (see learning/types.ts), so this is the point where the async
+    // storage read happens.
+    const learned = await learnedMappings.index();
+
     const actions: ResolvedFieldAction[] = [];
     let readyToFill = 0;
     let needsReview = 0;
@@ -215,7 +265,7 @@ export default defineBackground(() => {
       // A failure on one field must never abort the batch. A single unusual
       // control should cost that control, not the other nineteen on the page.
       try {
-        actions.push(resolveOneField(profile, descriptor as FieldDescriptor));
+        actions.push(resolveOneField(profile, descriptor as FieldDescriptor, learned));
       } catch (error) {
         log.warn('Field resolution failed', descriptor.localId, toAppError(error).message);
         actions.push({
@@ -247,10 +297,11 @@ export default defineBackground(() => {
   function resolveOneField(
     profile: Parameters<typeof resolveValue>[0],
     descriptor: FieldDescriptor,
+    learned: LearnedMappingIndex,
   ): ResolvedFieldAction {
-    // 1. What is this field asking for?
-    //    (Phase 5 will pass the learned-mapping lookup in here.)
-    const mapping = mapField(descriptor);
+    // 1. What is this field asking for? Past corrections are consulted here,
+    //    and a user-confirmed one outranks every heuristic in the cascade.
+    const mapping = mapField(descriptor, { learned });
 
     if (mapping.profilePath === null) {
       return {

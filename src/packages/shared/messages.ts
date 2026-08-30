@@ -110,6 +110,22 @@ export const fieldDescriptorSchema = z.object({
   semanticFingerprint: z.string().max(64),
 });
 
+/**
+ * The four scoped fingerprints for one field.
+ *
+ * Sent with fill results and corrections rather than recomputed in the service
+ * worker. The worker is stateless between messages (MV3 evicts it), so it would
+ * otherwise need the full descriptor back just to re-derive four short hashes -
+ * and any drift between the fingerprints used to MAP a field and those used to
+ * record feedback about it would silently attach the feedback to the wrong rule.
+ */
+export const fingerprintQuerySchema = z.object({
+  global: z.string().max(64),
+  ats: z.string().max(64),
+  company: z.string().max(64),
+  exact: z.string().max(64),
+});
+
 export const pageContextSchema = z.object({
   url: z.string().max(2048),
   hostname: z.string().max(256),
@@ -163,7 +179,7 @@ export const reportFillResultsRequestSchema = z.object({
     .array(
       z.object({
         localId: z.string().max(128),
-        semanticFingerprint: z.string().max(64),
+        fingerprints: fingerprintQuerySchema,
         profilePath: z.string().max(128).nullable(),
         attempted: z.boolean(),
         verified: z.boolean(),
@@ -182,14 +198,19 @@ export const getPageStateRequestSchema = z.object({
   version: z.number().int(),
 });
 
-/** The user teaching the system what a field means (spec section 19). */
+/**
+ * The user teaching the system what a field means (spec section 19).
+ *
+ * Carries the whole descriptor rather than a fingerprint. Fingerprinting stays
+ * the service worker's job so there is exactly ONE implementation of it: if the
+ * side panel computed fingerprints itself, a future change to the fingerprint
+ * inputs would have to be made in two places, and the failure mode of getting
+ * that wrong is corrections that quietly never match anything again.
+ */
 export const recordCorrectionRequestSchema = z.object({
   type: z.literal('RECORD_CORRECTION'),
   version: z.number().int(),
-  semanticFingerprint: z.string().max(64),
-  normalizedLabel: z.string().max(512).optional(),
-  hostname: z.string().max(256),
-  ats: atsKindSchema,
+  field: fieldDescriptorSchema,
   /** null means "this field maps to nothing" - itself a useful correction. */
   profilePath: z.string().max(128).nullable(),
   scope: z.enum(['global', 'ats', 'company', 'exact_field']),

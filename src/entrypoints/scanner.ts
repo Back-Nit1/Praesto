@@ -33,6 +33,7 @@ import {
 } from '@shared/messages';
 import { detectATS } from '@ats/detector';
 import { scanPage } from '@form-engine/detector/scanner';
+import { computeFingerprints } from '@form-engine/fingerprints/fingerprint';
 import { executeFills } from '@fill-engine/executor';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
 
@@ -170,8 +171,11 @@ export default defineUnlistedScript(() => {
           page: { url: location.href, hostname: location.hostname, ats: 'unknown' as const },
           results: outcomes.map((outcome) => ({
             localId: outcome.localId,
-            semanticFingerprint:
-              lastDescriptors.find((d) => d.localId === outcome.localId)?.semanticFingerprint ?? '',
+            // Computed from the descriptor this outcome belongs to, so the
+            // feedback lands on the same rule that produced the fill. An empty
+            // set means the descriptor is gone, and the worker will find no
+            // rule to credit - which is correct, not a silent miss.
+            fingerprints: fingerprintsFor(outcome.localId),
             profilePath: outcome.profilePath,
             attempted: outcome.attempted,
             verified: outcome.verified,
@@ -184,6 +188,53 @@ export default defineUnlistedScript(() => {
           // fill already happened and they can see it.
           log.debugLazy(() => ['Could not report fill results', error]);
         });
+    }
+
+    /**
+     * The four scoped fingerprints for a field from the last scan.
+     *
+     * Recomputed here rather than cached on the descriptor because only the
+     * global scope travels with a descriptor - carrying all four across the
+     * message boundary for every field would quadruple the hash payload of a
+     * scan for a feature that only fires on fill and correction.
+     */
+    function fingerprintsFor(localId: string): {
+      global: string;
+      ats: string;
+      company: string;
+      exact: string;
+    } {
+      const descriptor = lastDescriptors.find((candidate) => candidate.localId === localId);
+      if (descriptor === undefined) return { global: '', ats: '', company: '', exact: '' };
+      return computeFingerprints(descriptor);
+    }
+
+    /**
+     * Forward a user correction to the service worker.
+     *
+     * The scanner does this rather than the side panel because the DESCRIPTOR
+     * lives here. The panel knows a field by its `localId` and nothing more; the
+     * worker needs the full descriptor to fingerprint it. Routing through the
+     * page keeps descriptors in exactly one place and keeps fingerprinting in
+     * exactly one implementation.
+     */
+    async function recordCorrection(
+      localId: string,
+      profilePath: string | null,
+      scope: 'global' | 'ats' | 'company' | 'exact_field',
+    ): Promise<boolean> {
+      const field = lastDescriptors.find((candidate) => candidate.localId === localId);
+      if (field === undefined) return false;
+
+      const response = (await chrome.runtime.sendMessage({
+        type: 'RECORD_CORRECTION',
+        version: MESSAGE_PROTOCOL_VERSION,
+        field,
+        profilePath,
+        scope,
+      })) as { ok?: boolean } | undefined;
+
+      return response?.ok === true;
     }
 
     /**
@@ -229,6 +280,27 @@ export default defineUnlistedScript(() => {
           .catch((error: unknown) => {
             log.error('Scan failed', error);
             sendResponse({ ok: false, code: 'SCAN_FAILED', message: 'Could not scan this page' });
+          });
+        return true;
+      }
+
+      if (request?.type === 'CONTENT_CORRECT') {
+        const correction = message as {
+          localId?: string;
+          profilePath?: string | null;
+          scope?: 'global' | 'ats' | 'company' | 'exact_field';
+        };
+        if (typeof correction.localId !== 'string') return false;
+
+        recordCorrection(
+          correction.localId,
+          correction.profilePath ?? null,
+          correction.scope ?? 'global',
+        )
+          .then((ok) => sendResponse({ ok }))
+          .catch((error: unknown) => {
+            log.error('Could not record correction', error);
+            sendResponse({ ok: false });
           });
         return true;
       }

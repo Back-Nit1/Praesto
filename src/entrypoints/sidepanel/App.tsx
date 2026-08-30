@@ -30,6 +30,8 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { Button, StateBadge, StatusLine } from '@/components/ui';
 import type { ResolvedFieldAction } from '@shared/messages';
 import { createLogger } from '@shared/logging';
+import { labelForPath, SCALAR_PROFILE_PATHS } from '@profile/paths';
+import type { MappingScope } from '@learning/types';
 
 const log = createLogger('sidepanel');
 
@@ -43,6 +45,9 @@ type PanelState =
 export function App(): ReactNode {
   const [state, setState] = useState<PanelState>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
+    kind: 'idle',
+  });
 
   /**
    * Ensure the scanner is present in the active tab, then message it.
@@ -110,6 +115,45 @@ export function App(): ReactNode {
     setState({ kind: 'scanned', actions: response.actions });
   }
 
+  /**
+   * Teach the system what a field means.
+   *
+   * The panel sends only a `localId` and the user's choice. The scanner owns
+   * the descriptor and forwards it to the worker, which does the fingerprinting
+   * - so there is exactly one implementation of what makes two questions "the
+   * same question".
+   */
+  async function handleCorrect(
+    localId: string,
+    profilePath: string | null,
+    scope: MappingScope,
+  ): Promise<void> {
+    const response = await sendToActiveTab<{ ok: boolean }>({
+      type: 'CONTENT_CORRECT',
+      localId,
+      profilePath,
+      scope,
+    });
+
+    if (response?.ok !== true) {
+      setStatus({ kind: 'error', message: 'That correction could not be saved.' });
+      return;
+    }
+
+    setStatus({
+      kind: 'ok',
+      message:
+        profilePath === null
+          ? 'Noted - this field will be left alone from now on.'
+          : `Learned: this question means ${labelForPath(profilePath).toLowerCase()}.`,
+    });
+
+    // Rescan so the panel reflects the new mapping immediately. Seeing the
+    // field move from "needs review" to "ready" is the feedback that tells the
+    // user the correction actually took.
+    await handleScan();
+  }
+
   async function handleFill(actions: ResolvedFieldAction[]): Promise<void> {
     setBusy(true);
     await sendToActiveTab({
@@ -158,6 +202,8 @@ export function App(): ReactNode {
         </div>
       )}
 
+      <StatusLine status={status} />
+
       {(state.kind === 'scanned' || state.kind === 'filled') && (
         <ScanReport
           actions={state.actions}
@@ -165,6 +211,7 @@ export function App(): ReactNode {
           busy={busy}
           onFill={() => void handleFill(state.actions)}
           onRescan={handleScan}
+          onCorrect={(localId, path, scope) => void handleCorrect(localId, path, scope)}
         />
       )}
     </div>
@@ -185,12 +232,14 @@ function ScanReport({
   busy,
   onFill,
   onRescan,
+  onCorrect,
 }: {
   actions: ResolvedFieldAction[];
   filled: boolean;
   busy: boolean;
   onFill: () => void;
   onRescan: () => void;
+  onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
   const ready = actions.filter((action) => action.action === 'fill');
   const review = actions.filter((action) => action.action === 'suggest');
@@ -232,13 +281,29 @@ function ScanReport({
       </p>
 
       {review.length > 0 && (
-        <ActionGroup title="Needs your review" actions={review} state="needs_review" />
+        <ActionGroup
+          title="Needs your review"
+          actions={review}
+          state="needs_review"
+          onCorrect={onCorrect}
+        />
       )}
       {ready.length > 0 && (
-        <ActionGroup title={filled ? 'Filled' : 'Ready'} actions={ready} state="verified" />
+        <ActionGroup
+          title={filled ? 'Filled' : 'Ready'}
+          actions={ready}
+          state="verified"
+          onCorrect={onCorrect}
+        />
       )}
       {skipped.length > 0 && (
-        <ActionGroup title="Left alone" actions={skipped} state="missing" collapsed />
+        <ActionGroup
+          title="Left alone"
+          actions={skipped}
+          state="missing"
+          collapsed
+          onCorrect={onCorrect}
+        />
       )}
     </div>
   );
@@ -258,11 +323,13 @@ function ActionGroup({
   actions,
   state,
   collapsed = false,
+  onCorrect,
 }: {
   title: string;
   actions: ResolvedFieldAction[];
   state: 'verified' | 'needs_review' | 'missing';
   collapsed?: boolean;
+  onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
   const [open, setOpen] = useState(!collapsed);
 
@@ -283,20 +350,135 @@ function ActionGroup({
       {open && (
         <ul className="space-y-1">
           {actions.map((action) => (
-            <li key={action.localId} className="flex items-start gap-2 text-xs">
-              <StateBadge state={state} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{action.explanation ?? 'Field'}</span>
-                {action.value !== undefined && (
-                  <span className="block truncate font-mono text-zinc-500">
-                    {String(action.value)}
-                  </span>
-                )}
-              </span>
-            </li>
+            <ActionRow key={action.localId} action={action} state={state} onCorrect={onCorrect} />
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+
+/**
+ * One field in the audit list, with an inline correction control.
+ *
+ * The correction affordance is present on EVERY row, not only the uncertain
+ * ones. A field the system was confident about can still be wrong, and the user
+ * finding out they cannot tell it so is exactly how they stop trusting it.
+ */
+function ActionRow({
+  action,
+  state,
+  onCorrect,
+}: {
+  action: ResolvedFieldAction;
+  state: 'verified' | 'needs_review' | 'missing';
+  onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
+}): ReactNode {
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <li className="text-xs">
+      <div className="flex items-start gap-2">
+        <StateBadge state={state} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{action.explanation ?? 'Field'}</span>
+          {action.value !== undefined && (
+            <span className="block truncate font-mono text-zinc-500">{String(action.value)}</span>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setEditing((current) => !current)}
+          className="shrink-0 text-blue-600 hover:underline"
+          aria-expanded={editing}
+        >
+          {editing ? 'Cancel' : 'Change'}
+        </button>
+      </div>
+
+      {editing && (
+        <CorrectionPicker
+          currentPath={action.profilePath}
+          onSubmit={(path, scope) => {
+            setEditing(false);
+            onCorrect(action.localId, path, scope);
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+/**
+ * Pick what a field means, and how widely to remember it.
+ *
+ * THE SCOPE CHOICE IS THE USER'S, NOT OURS.
+ *
+ * We could infer a scope - "this looks company-specific, store it per company"
+ * - but the user knows something we do not: whether "Preferred hub" is this
+ * employer's private jargon or a phrase they expect to meet again. Guessing
+ * wrong is quietly costly in both directions: too narrow and the correction
+ * never helps again, too broad and one company's odd wording starts overriding
+ * sensible defaults everywhere.
+ *
+ * The default is `global`, because the common case is a phrasing our alias
+ * table simply has not seen yet, and that generalises.
+ */
+function CorrectionPicker({
+  currentPath,
+  onSubmit,
+}: {
+  currentPath: string | null;
+  onSubmit: (profilePath: string | null, scope: MappingScope) => void;
+}): ReactNode {
+  const [path, setPath] = useState<string>(currentPath ?? '');
+  const [scope, setScope] = useState<MappingScope>('global');
+
+  const SCOPE_LABELS: Array<{ value: MappingScope; label: string; hint: string }> = [
+    { value: 'global', label: 'Everywhere', hint: 'Any site that asks this' },
+    { value: 'ats', label: 'This platform', hint: 'Greenhouse, Lever, etc.' },
+    { value: 'company', label: 'This company', hint: 'Only on this site' },
+    { value: 'exact_field', label: 'Just this field', hint: 'This exact question' },
+  ];
+
+  return (
+    <div className="mt-2 space-y-2 rounded border border-zinc-200 p-2 dark:border-zinc-700">
+      <label className="block">
+        <span className="mb-1 block text-zinc-500">This question is asking for</span>
+        <select
+          value={path}
+          onChange={(event) => setPath(event.target.value)}
+          className="w-full rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+        >
+          {/* "Nothing" is a real, useful answer: it teaches the extension to
+              stop offering this field, which is itself a correction worth
+              remembering. */}
+          <option value="">Nothing - leave this field alone</option>
+          {SCALAR_PROFILE_PATHS.map((candidate) => (
+            <option key={candidate} value={candidate}>
+              {labelForPath(candidate)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-zinc-500">Remember this</span>
+        <select
+          value={scope}
+          onChange={(event) => setScope(event.target.value as MappingScope)}
+          className="w-full rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+        >
+          {SCOPE_LABELS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label} - {option.hint}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <Button onClick={() => onSubmit(path.length === 0 ? null : path, scope)}>Save</Button>
+    </div>
   );
 }

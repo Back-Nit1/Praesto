@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-08-30
-**Tests:** 188 passing · **Typecheck:** clean · **Build:** 492 kB
+**Tests:** 206 passing · **Typecheck:** clean · **Build:** 503 kB
 
 ---
 
@@ -15,8 +15,8 @@ Required by `prompt.md` section 0.13. Updated as work lands.
 | 1 — Canonical applicant profile | **Done** |
 | 2 — Resume parsing onboarding | Not started (deliberately deferred — see below) |
 | 3 — Generic semantic form engine | **Done**, including the mapping playground |
-| 4 — Generic fill engine | **Mostly done** — adapters, verification, side-panel review all work; correction UI and audit persistence outstanding |
-| 5 — Learned corrections | Interfaces and message contract defined; storage and capture not implemented |
+| 4 — Generic fill engine | **Mostly done** — adapters, verification, side-panel review and correction all work; audit persistence outstanding |
+| 5 — Learned corrections | **Done** |
 | 6 — Greenhouse + Lever | Detector done; no ATS-specific adapters yet (none needed so far) |
 | 7 — Workday | Not started |
 | 8 — Question / answer memory | Not started |
@@ -101,10 +101,43 @@ header of `src/packages/form-engine/mapper/mapper.ts`.
 - [x] Side-panel audit list
 - [x] High/medium/low confidence behaviour
 - [x] Debounced `MutationObserver`
-- [ ] User correction UI — the panel shows what happened but cannot yet be
-      corrected in place
+- [x] User correction UI — every row in the audit list has a **Change** control
 - [ ] Audit records persisted to IndexedDB — the store and schema exist;
-      `REPORT_FILL_RESULTS` currently logs and discards
+      `REPORT_FILL_RESULTS` feeds the learning counters but is not archived
+
+---
+
+## Phase 5 — Learned corrections
+
+- [x] Learned-mapping schema and repository
+- [x] All four scopes (global / ats / company / exact_field), narrowest wins
+- [x] Correction capture from the side panel
+- [x] Successful-use and correction counters
+- [x] Confidence adjusted by history
+- [x] Rules inspectable and deletable from settings
+- [x] Bad rules cannot trap the system
+
+**Definition of done, verified by test:**
+`tests/learning/mapping-memory.test.ts` reproduces the demo target from spec
+section 31 steps 9–12 end to end — an unfamiliar question ("Preferred hub") maps
+to nothing, the user corrects it once on a Greenhouse form, and the same
+question on a Lever form with entirely different markup then maps correctly at
+autofill confidence.
+
+**Three layered escapes from a bad rule** (spec section 19 requires that they
+exist; each covers a case the others do not):
+1. correction counts feed an *uncapped* confidence penalty, so a rule that is
+   repeatedly wrong falls below the suggestion floor on its own;
+2. past three corrections a rule is *retired* — kept in storage and shown in
+   settings, but never returned by a lookup, so the user can see the system
+   noticed rather than assuming it forgot;
+3. the user can delete any rule, or all of them, from settings.
+
+**"This field means nothing" is a first-class correction.** A user-confirmed
+rule with an empty path short-circuits the mapping cascade rather than competing
+in it. Competing would not be enough: a field labelled "Email" matches the alias
+registry at 0.97, so a merely-equal-weight rule would lose and the extension
+would keep filling the field the user just told it to stop touching.
 
 ---
 
@@ -114,10 +147,10 @@ Stated plainly, because the product's whole claim is that it does not overstate
 what it knows.
 
 1. **No resume parsing.** The profile is entered by hand or imported as JSON.
-2. **No learned corrections yet.** The mapper accepts a `LearnedMappingLookup`
-   and the message contract is defined, but nothing writes to it, so correcting
-   a field does not yet improve the next application. This is the single
-   highest-value remaining piece.
+2. **Corrections apply to scalar profile fields only.** The side panel's picker
+   lists the ~30 scalar paths. Correcting a field to a specific education or
+   employment entry (`education[0].gpa`) needs an entry picker the UI does not
+   have yet.
 3. **Custom dropdowns are not driven.** A `[role="combobox"]` is detected and
    described, but no adapter can open one and pick an option, so Workday-style
    controls are reported and left alone.
@@ -161,21 +194,25 @@ each would have been near-invisible in production:
 
 ## Next recommended task
 
-**Phase 5: learned corrections.** Everything it needs is already in place — the
-fingerprints, the `LearnedMappingLookup` seam in the mapper, the confidence
-adjustment for success and correction counts, and the `RECORD_CORRECTION`
-message. What is missing is the storage implementation, the correction control
-in the side panel, and a settings screen to inspect and delete learned rules.
+**Test against real Greenhouse and Lever applications.** Every layer the spec
+asks for before this point now exists and is covered by tests, but every test so
+far runs against markup *we* wrote. The fixtures encode what we believe real
+forms look like; only a real form can tell us where that belief is wrong.
 
-It is the right next step because it is what makes this tool different from a
-generic autofiller (spec section 19), and because the demo target in spec
-section 31 ends on it: correct an ambiguous field once, then have the extension
-map the same question correctly on a different page with different HTML.
+The method matters more than the finding: each failure becomes a fixture and a
+failing test before anything is changed, and the fix goes into the generic
+engine unless it genuinely cannot (spec section 18). Expect most gaps to be
+missing aliases — cheap, precise fixes — rather than anything structural.
 
-After that, in order: persist audit records (they are the input to every metric
-in spec section 26) → resume ingestion (Phase 2) → real Greenhouse and Lever
-applications, adding ATS adapters only where the generic engine genuinely
-cannot cope.
+After that, in order:
+1. **Persist audit records to IndexedDB.** They are the input to every metric in
+   spec section 26, and without them "incorrect-fill rate" — the metric the
+   spec calls most important — cannot be measured at all.
+2. **Wire the MutationObserver to an incremental rescan**, so conditionally
+   revealed questions are picked up without a manual rescan.
+3. **Resume ingestion (Phase 2).**
+4. **An ARIA combobox adapter**, which is the prerequisite for Workday and
+   already the most common reason a detected field is left alone.
 
 ---
 

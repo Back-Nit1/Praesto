@@ -23,7 +23,7 @@ will stop and ask when it genuinely does not know.
 npm install
 npm run dev        # dev build with hot reload
 npm run build      # production build -> .output/chrome-mv3
-npm test           # 188 tests
+npm test           # 206 tests
 npm run compile    # typecheck
 ```
 
@@ -51,6 +51,9 @@ submits an application.
 - Leaves ambiguous fields alone and surfaces them for review
 - Never answers a work-authorization or demographic question from anything but
   an answer you gave it explicitly
+- **Learns from your corrections.** Fix a field once and it maps that question
+  correctly on every future application — even where the HTML is completely
+  different
 
 See [`IMPLEMENTATION_STATUS.md`](./IMPLEMENTATION_STATUS.md) for what is built,
 what is not, and what is next.
@@ -117,7 +120,17 @@ I THINK this is probably right. → show it, do not fill it
 I DON'T KNOW.                   → leave it alone, tell you about it
 ```
 
-**4. Legal and demographic answers are never inferred.**
+**4. Your corrections outrank our heuristics.**
+Correcting a field stores a rule keyed on a *semantic fingerprint* — a hash of
+what the question SAYS, not of the markup around it. So a correction made on a
+Greenhouse form applies on a Lever form asking the same thing, even though the
+two share no ids, classes, or structure. A user-confirmed rule beats the alias
+registry outright, because you are the authority on your own application and a
+table we wrote is not. You choose how widely each correction applies
+(everywhere / this platform / this company / just this field), and every rule is
+listed, with its track record, under **Learned rules** in the options page.
+
+**5. Legal and demographic answers are never inferred.**
 Work authorization, sponsorship, citizenship, gender, race, disability and
 veteran status can only come from an answer you gave in the profile editor.
 Never from your name, your university, your address, or a language on your
@@ -163,10 +176,10 @@ src/
     ├── form-engine/         detector, descriptor, fingerprints, mapper, resolver, confidence
     ├── fill-engine/         control adapters, native setter, executor
     ├── ats/                 ATS detection and adapter contracts
-    └── learning/            learned-mapping types (Phase 5)
+    └── learning/            learned mappings from your corrections
 
 fixtures/forms/              HTML the tests run the real pipeline against
-tests/                       188 tests, mostly browser-free
+tests/                       206 tests, mostly browser-free
 ```
 
 **Why the mapper never touches the DOM.** The content script converts elements

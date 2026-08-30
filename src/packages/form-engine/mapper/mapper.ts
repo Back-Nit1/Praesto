@@ -165,6 +165,22 @@ export function mapField(
   // --- 4. Learned mappings from past user corrections ----------------------
   const fingerprints = computeFingerprints(descriptor);
   const learnedMatch = learned.find(fingerprints);
+
+  // An empty path on a user-confirmed rule is an explicit instruction: "this
+  // question means nothing, leave it alone." It must SHORT-CIRCUIT, not merely
+  // compete - otherwise an alias match would outscore it and we would keep
+  // filling the field the user just told us to stop touching. This is the one
+  // place in the cascade where a candidate cancels the others rather than
+  // being weighed against them.
+  if (learnedMatch !== null && learnedMatch.userConfirmed && learnedMatch.profilePath === '') {
+    return unknownMapping(descriptor.localId, [
+      {
+        signal: 'learned_mapping',
+        detail: `You told us to leave this field alone (scope=${learnedMatch.scope})`,
+      },
+    ]);
+  }
+
   if (learnedMatch !== null) {
     candidates.push({
       path: learnedMatch.profilePath as ProfilePath,

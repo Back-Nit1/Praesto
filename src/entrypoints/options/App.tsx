@@ -12,8 +12,15 @@ import { Button, StatusLine } from '@/components/ui';
 import { useProfile } from '@/hooks/use-profile';
 import { ProfileEditor } from './ProfileEditor';
 import { MappingPlayground } from './MappingPlayground';
+import { LearnedRules } from './LearnedRules';
 
-type Tab = 'profile' | 'playground';
+type Tab = 'profile' | 'learned' | 'playground';
+
+const TAB_LABELS: Record<Tab, string> = {
+  profile: 'Profile',
+  learned: 'Learned rules',
+  playground: 'Mapping playground',
+};
 
 export function App(): ReactNode {
   const { profile, loading, error, edit, save, exportJson, importJson, dirty } = useProfile();
@@ -104,23 +111,24 @@ export function App(): ReactNode {
       {error !== undefined && <StatusLine status={{ kind: 'error', message: error }} />}
 
       <nav className="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-700">
-        {(['profile', 'playground'] as const).map((candidate) => (
+        {(['profile', 'learned', 'playground'] as const).map((candidate) => (
           <button
             key={candidate}
             type="button"
             onClick={() => setTab(candidate)}
-            className={`px-3 py-2 text-sm capitalize ${
+            className={`px-3 py-2 text-sm ${
               tab === candidate
                 ? 'border-b-2 border-blue-600 font-medium'
                 : 'text-zinc-500 hover:text-zinc-800'
             }`}
           >
-            {candidate === 'playground' ? 'Mapping playground' : 'Profile'}
+            {TAB_LABELS[candidate]}
           </button>
         ))}
       </nav>
 
       {tab === 'profile' && profile !== undefined && <ProfileEditor profile={profile} edit={edit} />}
+      {tab === 'learned' && <LearnedRules />}
       {tab === 'playground' && <MappingPlayground profile={profile} />}
     </div>
   );
