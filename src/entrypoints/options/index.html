@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Job Application Agent - Profile</title>
+    <!--
+      Open the profile editor as a real browser tab, not as the cramped dialog
+      Chrome embeds inside chrome://extensions by default. This is a full-page
+      onboarding surface (spec section 9) with a form far too large for a popup.
+      WXT reads options-page manifest flags from meta tags like this one.
+    -->
+    <meta name="manifest.open_in_tab" content="true" />
   </head>
   <body>
     <div id="root"></div>

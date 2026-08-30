@@ -59,6 +59,7 @@ export default defineConfig({
 
     action: { default_title: 'Personal Job Application Agent' },
 
+
     // Opening the side panel from the toolbar icon is handled in background.ts
     // via chrome.sidePanel.setPanelBehavior.
     side_panel: { default_path: 'sidepanel.html' },

@@ -138,9 +138,11 @@ comment asking people to remember.
   descriptors for the fields it found and receives values for *those fields
   only*. Even if a page compromised the content script, the most it could learn
   is the answers to the questions it already displayed.
-- **Minimal permissions.** `storage`, `sidePanel`, `scripting`, `activeTab`. No
-  install-time host permissions — site access is granted per origin, when you
-  ask for it.
+- **Minimal permissions.** `storage`, `sidePanel`, `scripting`, `activeTab`.
+  The built manifest declares **no host permissions and no content scripts** —
+  so Chrome does not show the "read and change all your data on all websites"
+  warning at install. The page scanner is injected into one tab, by your click,
+  under `activeTab`. Your click is the grant.
 - **It never submits an application.**
 
 ---
@@ -151,7 +153,7 @@ comment asking people to remember.
 src/
 ├── entrypoints/
 │   ├── background.ts        service worker: coordination, profile access
-│   ├── content.ts           page context: scan, fill, verify
+│   ├── scanner.ts           page context: scan, fill, verify (injected on demand)
 │   ├── sidepanel/           the review surface you work in
 │   └── options/             profile editor + mapping playground
 └── packages/

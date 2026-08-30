@@ -215,7 +215,19 @@ Every limit lives in one table so the performance posture is reviewable in a
 diff. Crucially, the budget never influences a mapping or confidence decision:
 a smaller budget means slower, never wrong.
 
-**6. Scanner returns element references separately from the serializable
+**6. The page scanner is injected on demand, not declared as a content
+script.** The spec does not say how the content script should be registered.
+A declared `<all_urls>` content script - and a runtime-registered one, which
+needs the same grant - makes Chrome request host access at install time and
+warn that the extension can read and change data on every website. Instead the
+scanner is built as a standalone script and injected by
+`chrome.scripting.executeScript` when the user clicks Scan, which runs under
+`activeTab`: one tab, after a click, until they navigate away. The built
+manifest therefore declares no host permissions and no content scripts. The
+tradeoff is that nothing observes a page before the user asks, which is the
+behaviour we wanted regardless.
+
+**7. Scanner returns element references separately from the serializable
 result.** The spec does not specify how a fill instruction finds its element
 again. Stamping `data-aa-id` on the page was rejected: it mutates a page we do
 not own, is visible to the site's own scripts, and can be stripped. Instead

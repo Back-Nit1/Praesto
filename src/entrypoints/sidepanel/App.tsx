@@ -45,22 +45,41 @@ export function App(): ReactNode {
   const [busy, setBusy] = useState(false);
 
   /**
-   * Send a message to the content script in the active tab.
+   * Ensure the scanner is present in the active tab, then message it.
    *
-   * `chrome.tabs.sendMessage` addresses the tab directly rather than going
-   * through the service worker. One less hop, and the worker has no reason to
-   * be involved in a panel-to-page request that carries no profile data.
+   * THE INJECTION IS THE PERMISSION MODEL.
+   *
+   * The scanner is not a declared content script - see the header of
+   * `entrypoints/scanner.ts`. It is injected here, on an explicit user action,
+   * which is what lets the extension run under `activeTab` instead of asking
+   * for host access to every website at install time. The user's click IS the
+   * grant.
+   *
+   * `executeScript` is safe to call repeatedly: the scanner guards its own
+   * re-injection, so a second Scan click re-runs the file and returns
+   * immediately rather than installing a duplicate message listener.
    */
   const sendToActiveTab = useCallback(async <T,>(message: unknown): Promise<T | undefined> => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id === undefined) return undefined;
+    const tabId = tab.id;
+
     try {
-      return (await chrome.tabs.sendMessage(tab.id, message)) as T;
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['scanner.js'] });
     } catch (error) {
-      // Thrown when no content script is listening: a chrome:// page, the web
-      // store, a PDF viewer, or a tab loaded before the extension was
-      // installed. All are normal, none are bugs.
-      log.debugLazy(() => ['No content script in the active tab', error]);
+      // Injection is refused on pages no extension may touch: chrome://, the
+      // Web Store, the PDF viewer, and other extensions' pages. Normal, not a
+      // bug, and the caller turns it into a readable message.
+      log.debugLazy(() => ['Could not inject the scanner into this tab', error]);
+      return undefined;
+    }
+
+    try {
+      return (await chrome.tabs.sendMessage(tabId, message)) as T;
+    } catch (error) {
+      // The tab navigated between injection and the message, or the page tore
+      // down the listener. Recoverable - the user can scan again.
+      log.debugLazy(() => ['The page did not answer', error]);
       return undefined;
     }
   }, []);
@@ -78,7 +97,8 @@ export function App(): ReactNode {
     if (response === undefined) {
       setState({
         kind: 'error',
-        message: 'No application form found on this page. Try reloading it first.',
+        message:
+          'This page cannot be scanned. Chrome blocks extensions on its own pages, the Web Store, and PDFs.',
       });
       return;
     }

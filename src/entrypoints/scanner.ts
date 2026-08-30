@@ -1,5 +1,5 @@
 /**
- * Content script.
+ * Page scanner - injected into a job application on request.
  * ---------------------------------------------------------------------------
  * Runs inside the job application page. Spec section 10.1 defines what it may
  * and may not do, and the "may not" list is the important half:
@@ -22,7 +22,7 @@
  * worker cannot address a DOM node even in principle - it can only say "fill
  * the field you called f_123".
  */
-import { defineContentScript } from 'wxt/utils/define-content-script';
+import { defineUnlistedScript } from 'wxt/utils/define-unlisted-script';
 import { createLogger } from '@shared/logging';
 import { getRuntimeBudget } from '@shared/runtime-budget';
 import {
@@ -38,18 +38,44 @@ import type { FieldDescriptor } from '@form-engine/descriptor/types';
 
 const log = createLogger('content');
 
-export default defineContentScript({
-  // Runs everywhere, but does nothing until asked. See `shouldEngage` below:
-  // the script costs a few hundred microseconds on a page with no form, and
-  // registering narrowly by URL would miss every company careers site that
-  // embeds an ATS under its own domain.
-  matches: ['<all_urls>'],
+/**
+ * Marker on the page's window object, so a second injection is a no-op.
+ *
+ * `chrome.scripting.executeScript` runs the file again every time it is called,
+ * and the user can click Scan repeatedly. Without this guard each click would
+ * add another `onMessage` listener, and by the third scan every request would
+ * be answered three times - with three separate element maps, only one of which
+ * matches the descriptors the panel is holding.
+ */
+const INJECTION_MARKER = '__applicantAgentScannerReady';
 
-  // `document_idle` waits for the page to finish its initial work. Scanning at
-  // document_start would find an empty DOM on any framework-rendered form.
-  runAt: 'document_idle',
+export default defineUnlistedScript(() => {
+  /**
+   * INJECTED ON DEMAND, NOT DECLARED IN THE MANIFEST.
+   *
+   * This file is built as a standalone script and is absent from the manifest's
+   * `content_scripts`. The side panel injects it with
+   * `chrome.scripting.executeScript` when the user asks to scan a page.
+   *
+   * This is the difference between two very different install prompts. A
+   * declared `<all_urls>` content script - or a runtime-registered one, which
+   * needs the same grant - makes Chrome demand host access at install time and
+   * warn that the extension can "read and change all your data on all
+   * websites". Injecting on demand runs under `activeTab`: access to one tab,
+   * only after the user clicks the extension, and only until they navigate
+   * away. For an extension whose pitch is that it is trustworthy with your
+   * personal data, that install prompt is part of the product.
+   *
+   * The cost is that this script is not present until the user asks for it, so
+   * it cannot observe the page beforehand. That is the behaviour we want
+   * anyway: scanning is user-initiated, and nothing here should run on the
+   * pages someone visits that are not job applications.
+   */
+  const alreadyInjected = (window as unknown as Record<string, unknown>)[INJECTION_MARKER] === true;
+  if (alreadyInjected) return;
+  (window as unknown as Record<string, unknown>)[INJECTION_MARKER] = true;
 
-  main() {
+  {
     /**
      * localId -> live element.
      *
@@ -221,18 +247,22 @@ export default defineContentScript({
     });
 
     // --- startup -----------------------------------------------------------
+    // The user has already asked for this page to be handled by injecting us,
+    // so the only remaining question is whether there is anything here to work
+    // with. `shouldEngage` is still worth checking: the panel's message is
+    // clearer if we can say "no form here" rather than silently returning zero
+    // fields from a full scan.
     if (!shouldEngage()) {
-      log.debug('No application-shaped form on this page; staying idle');
-      return;
+      log.debug('No application-shaped form on this page');
+    } else {
+      log.info('Application-shaped page detected; ready to scan on request');
     }
 
-    log.info('Application-shaped page detected; ready to scan on request');
-
-    // Watch for dynamically revealed fields, but do NOT auto-scan on load.
-    // Scanning is user-initiated: an unrequested scan on every page with three
-    // inputs would be both surprising and wasteful.
+    // Watch for dynamically revealed fields. Note this only ever LOGS - it does
+    // not trigger a fill. A form that reveals a question in response to an
+    // answer must not have that question filled without the user seeing it.
     watchForNewFields(() => {
       log.debugLazy(() => ['New nodes appeared; a rescan would be useful']);
     });
-  },
+  }
 });
