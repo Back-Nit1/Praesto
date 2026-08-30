@@ -81,12 +81,12 @@ export function Button({
 }): ReactNode {
   const variants = {
     primary:
-      'border border-transparent bg-[--app-accent] text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] hover:bg-[--app-accent-strong] hover:-translate-y-px',
+      'border border-transparent bg-[var(--app-accent)] text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] hover:bg-[var(--app-accent-strong)] hover:-translate-y-px',
     secondary:
-      'border border-[--app-border] bg-[--app-panel-soft] text-[--app-text] hover:border-[--app-border-strong] hover:bg-[--app-panel]',
+      'border border-[var(--app-border)] bg-[var(--app-panel-soft)] text-[--app-text] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-panel)]',
     danger:
       'border border-red-500/20 bg-red-500/10 text-[--app-danger] hover:bg-red-500/15',
-    ghost: 'border border-transparent bg-transparent text-[--app-muted] hover:bg-[--app-panel-soft] hover:text-[--app-text]',
+    ghost: 'border border-transparent bg-transparent text-[--app-muted] hover:bg-[var(--app-panel-soft)] hover:text-[--app-text]',
   } as const;
 
   return (
@@ -155,7 +155,7 @@ export function Field({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
+        className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
       />
       {hint !== undefined && (
         <span className="mt-1.5 block text-[11px] leading-relaxed text-[--app-muted]">{hint}</span>

@@ -181,7 +181,7 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
               key={preset.title}
               type="button"
               onClick={() => setInputs({ ...EMPTY_INPUTS, ...preset.inputs })}
-              className="rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2.5 py-1.5 text-[11px] font-medium text-[--app-muted] transition hover:border-[--app-border-strong] hover:bg-[--app-panel] hover:text-[--app-text]"
+              className="rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[--app-muted] transition hover:border-[var(--app-border-strong)] hover:bg-[var(--app-panel)] hover:text-[--app-text]"
             >
               {preset.title}
             </button>
@@ -215,7 +215,7 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
           <select
             value={inputs.kind}
             onChange={(event) => update({ kind: event.target.value as ControlKind })}
-            className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
+            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] outline-none transition hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
           >
             {CONTROL_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -233,7 +233,7 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
             value={inputs.optionsText}
             onChange={(event) => update({ optionsText: event.target.value })}
             rows={4}
-            className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
+            className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
           />
         </label>
       </div>
@@ -294,7 +294,7 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
           )}
         </Row>
 
-        <div className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3">
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3">
           <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted]">
             Reasons
           </div>
@@ -325,7 +325,7 @@ export function MappingPlayground({ profile }: { profile: ApplicantProfile | und
           </div>
         )}
 
-        <div className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3">
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3">
           <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted]">
             Semantic fingerprint
           </div>
@@ -360,7 +360,7 @@ function PlaygroundInput({
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
+        className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 font-mono text-xs text-[--app-text] outline-none transition hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
       />
     </label>
   );

@@ -168,20 +168,20 @@ export function App(): ReactNode {
                   onClick={() => setTab(candidate)}
                   className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     selected
-                      ? 'bg-[--app-accent-soft] font-semibold text-[--app-accent] shadow-[inset_0_0_0_1px_var(--app-border)]'
-                      : 'text-[--app-muted] hover:bg-[--app-panel-soft] hover:text-[--app-text]'
+                      ? 'bg-[var(--app-accent-soft)] font-semibold text-[--app-accent] shadow-[inset_0_0_0_1px_var(--app-border)]'
+                      : 'text-[--app-muted] hover:bg-[var(--app-panel-soft)] hover:text-[--app-text]'
                   }`}
                   aria-current={selected ? 'page' : undefined}
                 >
                   <NavIcon tab={candidate} active={selected} />
                   <span>{TAB_LABELS[candidate]}</span>
-                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[--app-accent]" />}
+                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--app-accent)]" />}
                 </button>
               );
             })}
           </nav>
 
-          <div className="mt-auto rounded-2xl border border-[--app-border] bg-[--app-panel-soft] p-4">
+          <div className="mt-auto rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-4">
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[--app-text]">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-[--app-success]">
                 <ShieldIcon />
@@ -207,7 +207,7 @@ export function App(): ReactNode {
                 <Button variant="ghost" onClick={handleExport}>
                   <DownloadIcon /> Export
                 </Button>
-                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3.5 py-2 text-sm font-semibold text-[--app-text] transition hover:border-[--app-border-strong] hover:bg-[--app-panel]">
+                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3.5 py-2 text-sm font-semibold text-[--app-text] transition hover:border-[var(--app-border-strong)] hover:bg-[var(--app-panel)]">
                   <UploadIcon /> Import
                   <input
                     type="file"

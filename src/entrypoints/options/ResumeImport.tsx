@@ -207,7 +207,7 @@ export function ResumeImport(): ReactNode {
     <div className="max-w-4xl space-y-6">
       <section className="surface-card relative overflow-hidden p-6 sm:p-8">
         <div className="relative z-10 max-w-2xl">
-          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[--app-accent-soft] text-[--app-accent]">
+          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[var(--app-accent-soft)] text-[--app-accent]">
             <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" />
             </svg>
@@ -217,7 +217,7 @@ export function ResumeImport(): ReactNode {
             Upload a PDF once. It stays in this browser, helps build your profile, and is ready to attach when an application asks for it.
           </p>
 
-          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[--app-accent] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition hover:-translate-y-px hover:bg-[--app-accent-strong]">
+          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition hover:-translate-y-px hover:bg-[var(--app-accent-strong)]">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" /></svg>
           {busy ? 'Reading your resume…' : 'Upload PDF resume'}
           <input
@@ -248,7 +248,7 @@ export function ResumeImport(): ReactNode {
             {stored.map((document) => (
               <li
                 key={document.id}
-                className="flex items-center justify-between rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3.5 py-3 text-sm"
+                className="flex items-center justify-between rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3.5 py-3 text-sm"
               >
                 <span className="min-w-0 flex-1 truncate">
                   {document.fileName}
@@ -343,9 +343,9 @@ function ReviewExtraction({
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[--app-border]">
+      <div className="overflow-x-auto rounded-xl border border-[var(--app-border)]">
       <table className="w-full text-left text-sm">
-        <thead className="bg-[--app-panel-soft] text-[10px] uppercase tracking-[0.12em] text-[--app-muted]">
+        <thead className="bg-[var(--app-panel-soft)] text-[10px] uppercase tracking-[0.12em] text-[--app-muted]">
           <tr>
             <th className="w-8 py-1" />
             <th className="py-1">Field</th>
@@ -357,7 +357,7 @@ function ReviewExtraction({
           {entries.map(([path, value]) => {
             const confidence = bestConfidence(value);
             return (
-              <tr key={path} className="border-t border-[--app-border]">
+              <tr key={path} className="border-t border-[var(--app-border)]">
                 <td className="py-2">
                   <input
                     type="checkbox"
@@ -389,7 +389,7 @@ function ReviewExtraction({
       {(parsed.education.length > 0 ||
         parsed.employment.length > 0 ||
         parsed.projects.length > 0) && (
-        <p className="rounded-xl border border-[--app-border] bg-[--app-panel-soft] p-3 text-sm leading-relaxed text-[--app-muted]">
+        <p className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3 text-sm leading-relaxed text-[--app-muted]">
           Also found {parsed.education.length} education, {parsed.employment.length} experience and{' '}
           {parsed.projects.length} project entries. These are added as-is — review them in the
           Profile tab, where you can correct anything that was read wrong.

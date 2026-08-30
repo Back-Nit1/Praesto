@@ -692,7 +692,7 @@ function EmploymentEntry({
         applicant knows and what forms ask. It also drives which job is offered
         as "current employer", which is a stronger signal than any date parse.
       */}
-      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] transition hover:border-[--app-border-strong]">
+      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] transition hover:border-[var(--app-border-strong)]">
         <input
           type="checkbox"
           checked={current}
@@ -890,7 +890,7 @@ function TextAreaField({
         value={value}
         rows={3}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-y rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[--app-border-strong] focus:border-[--app-accent] focus:bg-[--app-panel] focus:ring-4 focus:ring-indigo-500/8"
+        className="w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
       />
       {hint !== undefined && (
         <span className="mt-1.5 block text-[11px] leading-relaxed text-[--app-muted]">{hint}</span>
@@ -921,7 +921,7 @@ function EntryCard({
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="rounded-2xl border border-[--app-border] bg-[--app-panel-soft] p-3.5 transition hover:border-[--app-border-strong]">
+    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3.5 transition hover:border-[var(--app-border-strong)]">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
@@ -929,7 +929,7 @@ function EntryCard({
           className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm font-semibold text-[--app-text]"
           aria-expanded={open}
         >
-          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[--app-accent-soft] text-xs text-[--app-accent]" aria-hidden="true">
+          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--app-accent-soft)] text-xs text-[--app-accent]" aria-hidden="true">
             {open ? '−' : '+'}
           </span>
           <span className="truncate">{title}</span>
@@ -942,7 +942,7 @@ function EntryCard({
           {removeLabel}
         </button>
       </div>
-      {open && <div className="mt-4 space-y-3.5 border-t border-[--app-border] pt-4">{children}</div>}
+      {open && <div className="mt-4 space-y-3.5 border-t border-[var(--app-border)] pt-4">{children}</div>}
     </div>
   );
 }
@@ -952,7 +952,7 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }): 
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[--app-border-strong] bg-[--app-panel-soft] px-3 py-2.5 text-sm font-semibold text-[--app-accent] transition hover:border-[--app-accent] hover:bg-[--app-accent-soft]"
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--app-border-strong)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm font-semibold text-[--app-accent] transition hover:border-[var(--app-accent)] hover:bg-[var(--app-accent-soft)]"
     >
       <span className="text-base leading-none" aria-hidden="true">+</span>
       {label}
@@ -986,12 +986,12 @@ function TriStateQuestion({
   ];
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[--app-border] bg-[--app-panel-soft] px-3 py-2.5">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5">
       <span className="flex items-center gap-2 text-sm font-medium text-[--app-text]">
         <StateBadge state={state} />
         {label}
       </span>
-      <div className="flex rounded-lg border border-[--app-border] bg-[--app-panel] p-0.5">
+      <div className="flex rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-0.5">
         {options.map((option) => (
           <button
             key={String(option.value)}
@@ -999,8 +999,8 @@ function TriStateQuestion({
             onClick={() => onChange(option.value)}
             className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
               value === option.value
-                ? 'bg-[--app-accent] text-white shadow-sm'
-                : 'text-[--app-muted] hover:bg-[--app-panel-soft] hover:text-[--app-text]'
+                ? 'bg-[var(--app-accent)] text-white shadow-sm'
+                : 'text-[--app-muted] hover:bg-[var(--app-panel-soft)] hover:text-[--app-text]'
             }`}
             aria-pressed={value === option.value}
           >

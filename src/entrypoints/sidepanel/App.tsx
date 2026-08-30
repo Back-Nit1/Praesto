@@ -646,7 +646,7 @@ export function App(): ReactNode {
               Scan this page
             </Button>
             <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-[--app-muted]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[--app-teal]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-teal)]" />
               Nothing is filled without your click
             </div>
           </div>
@@ -891,7 +891,7 @@ function ScanReport({
   if (actions.length === 0) {
     return (
       <div className="panel-card p-5 text-center">
-        <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-xl border border-[--app-border] bg-[--app-panel-soft] text-[--app-muted]">
+        <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] text-[--app-muted]">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3" /><path d="M9 12h6" /></svg>
         </span>
         <p className="text-xs leading-relaxed text-[--app-muted]">
@@ -965,7 +965,10 @@ function ScanReport({
              the review list is a dead end that can only be acted on by
              retyping. */
           bulkAction={{
-            label: `Fill all ${review.length} suggestion${review.length === 1 ? '' : 's'}`,
+            label:
+              review.length === 1
+                ? 'Fill this suggestion'
+                : `Fill all ${review.length} suggestions`,
             actions: review.filter((action) => outcomes[action.localId] === undefined),
           }}
         />
@@ -1030,19 +1033,19 @@ function ActionGroup({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted] transition hover:bg-[--app-panel]"
+        className="flex w-full items-center justify-between px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted] transition hover:bg-[var(--app-panel)]"
         aria-expanded={open}
       >
         <span>
           {title} ({actions.length})
         </span>
-        <span className="grid h-5 w-5 place-items-center rounded-md bg-[--app-panel] text-sm font-medium text-[--app-accent]" aria-hidden="true">{open ? '−' : '+'}</span>
+        <span className="grid h-5 w-5 place-items-center rounded-md bg-[var(--app-panel)] text-sm font-medium text-[--app-accent]" aria-hidden="true">{open ? '−' : '+'}</span>
       </button>
 
       {open && (
         <>
           {bulkAction !== undefined && bulkAction.actions.length > 0 && (
-            <div className="border-t border-[--app-border] px-3 py-2.5">
+            <div className="border-t border-[var(--app-border)] px-3 py-2.5">
               <Button
                 variant="secondary"
                 className="w-full"
@@ -1058,7 +1061,7 @@ function ActionGroup({
               </Button>
             </div>
           )}
-          <ul className="border-t border-[--app-border]">
+          <ul className="border-t border-[var(--app-border)]">
             {actions.map((action) => (
               <ActionRow
                 key={action.localId}
@@ -1138,7 +1141,7 @@ function ActionRow({
   const canEditValue = canAccept && action.optionValue === undefined && action.value !== undefined;
 
   return (
-    <li className="border-b border-[--app-border] px-3 py-3 text-xs last:border-b-0">
+    <li className="border-b border-[var(--app-border)] px-3 py-3 text-xs last:border-b-0">
       <div className="flex items-start gap-2.5">
         <StateBadge state={state} />
         <span className="min-w-0 flex-1">
@@ -1178,7 +1181,7 @@ function ActionRow({
       </div>
 
       {editing && (
-        <div className="mt-3 space-y-3 rounded-xl border border-[--app-border] bg-[--app-panel] p-3">
+        <div className="mt-3 space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
           {canEditValue && (
             <label className="block">
               <span className="mb-1.5 block font-medium text-[--app-muted]">Use this value</span>
@@ -1187,7 +1190,7 @@ function ActionRow({
                   type="text"
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-1.5 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
+                  className="min-w-0 flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-1.5 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
                 />
                 <Button
                   onClick={() => {
@@ -1368,7 +1371,7 @@ function CorrectionPicker({
         <select
           value={path}
           onChange={(event) => setPath(event.target.value)}
-          className="w-full rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-2 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
+          className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-2 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
         >
           {/* "Nothing" is a real, useful answer: it teaches the extension to
               stop offering this field, which is itself a correction worth
@@ -1391,7 +1394,7 @@ function CorrectionPicker({
         <select
           value={scope}
           onChange={(event) => setScope(event.target.value as MappingScope)}
-          className="w-full rounded-lg border border-[--app-border] bg-[--app-panel-soft] px-2 py-2 text-xs outline-none focus:border-[--app-accent] focus:ring-2 focus:ring-indigo-500/10"
+          className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-2 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
         >
           {SCOPE_LABELS.map((option) => (
             <option key={option.value} value={option.value}>
