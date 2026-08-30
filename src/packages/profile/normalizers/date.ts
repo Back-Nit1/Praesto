@@ -31,24 +31,35 @@
  * A calendar value where any component may be unknown.
  * Every field is optional on purpose - see the module comment.
  */
+/*
+ * Every optional property is written `?: T | undefined` rather than `?: T`.
+ *
+ * Under `exactOptionalPropertyTypes` those are DIFFERENT types, and this
+ * interface has to stay assignable in BOTH directions with
+ * `normalizedDateSchema` in profile/schema.ts, which it mirrors. Zod's
+ * `.optional()` produces the `| undefined` form, so writing the bare form here
+ * makes a date read back out of the profile unassignable to this type - which
+ * is exactly what happened when the profile editor first tried to hand a
+ * stored graduation date to `formatDate`. Same reasoning as `ProfileValue.raw`.
+ */
 export interface NormalizedDate {
   /** Exactly what the source said, preserved verbatim for the audit trail. */
-  raw?: string;
-  year?: number;
+  raw?: string | undefined;
+  year?: number | undefined;
   /** 1-12. One-based to match how humans and form dropdowns count months. */
-  month?: number;
+  month?: number | undefined;
   /** 1-31. */
-  day?: number;
+  day?: number | undefined;
   /** ISO 8601 - only present when the date is complete (Y-M-D all known). */
-  iso?: string;
+  iso?: string | undefined;
   /** True for "Present" / "Current" - an open-ended end date, not a date. */
-  isPresent?: boolean;
+  isPresent?: boolean | undefined;
   /**
    * True when the source could be read as either D/M/Y or M/D/Y and the two
    * readings disagree. The profile editor surfaces this as "needs review"
    * rather than trusting our convention.
    */
-  ambiguousDayMonth?: boolean;
+  ambiguousDayMonth?: boolean | undefined;
 }
 
 /** Which order a bare numeric date like 03/04/2025 should be read in. */
