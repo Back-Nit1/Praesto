@@ -67,6 +67,89 @@ const IGNORED_INPUT_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'ima
  */
 const SEARCH_HINTS = /\b(search|filter|query|newsletter|subscribe|coupon|promo)\b/i;
 
+/**
+ * SECURITY: length caps for every page-controlled string in a descriptor.
+ *
+ * THE BUG THESE FIX. Every value below is written by the page. The message
+ * schema in shared/messages.ts already caps them - but it caps them on the
+ * RECEIVING side, where the only available response to an over-long string is
+ * to reject the ENTIRE message. So a page that rendered one label containing a
+ * megabyte of text did not get its own field dropped: it made the whole scan
+ * fail Zod validation, and the side panel told the user "this page could not be
+ * scanned". A hostile page could disable the extension with one attribute, and
+ * a merely sloppy one could do it by accident.
+ *
+ * Truncating at the source fixes both halves:
+ *   - correctness: a huge label costs that label, not the page,
+ *   - memory: the megabyte is never copied across the message boundary, held
+ *     in the service worker, or retained in `lastDescriptors`. On the low-RAM
+ *     machines this extension targets, an unbounded harvest of page text is
+ *     the single easiest way to get the tab killed.
+ *
+ * Every number here is <= its counterpart in `fieldDescriptorSchema`. They must
+ * stay that way; the schema is the contract and this is the enforcement.
+ */
+const MAX = {
+  type: 32,
+  role: 64,
+  autocomplete: 128,
+  label: 512,
+  accessibleName: 512,
+  name: 256,
+  id: 256,
+  placeholder: 256,
+  sectionHeading: 256,
+  currentValue: 1024,
+  pageUrl: 2048,
+  hostname: 256,
+  tag: 32,
+  optionValue: 512,
+  optionLabel: 512,
+} as const;
+
+/**
+ * Largest number of options carried for one control.
+ *
+ * A country dropdown is ~250 entries, so 500 is generous. It matches the
+ * schema's cap for the same reason as the string limits: a `<select>` with
+ * 100,000 synthetic options would otherwise fail validation for the whole page
+ * (and cost 100,000 string allocations first).
+ */
+const MAX_OPTIONS_PER_FIELD = 500;
+
+/**
+ * Truncate a page-controlled string.
+ *
+ * Returns `undefined` for absent input so it composes with the optional-field
+ * assignments below. O(1) for the overwhelmingly common short string - `slice`
+ * only allocates when the cap is actually exceeded.
+ */
+function capped(value: string | null | undefined, max: number): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+/**
+ * SECURITY / DATA MINIMISATION: reduce a page URL to origin + path.
+ *
+ * ATS URLs routinely carry session identifiers, applicant tokens and tracking
+ * parameters in the query string ("?gh_src=...&token=..."). Nothing downstream
+ * reads more than the hostname, so carrying the rest into the service worker,
+ * into `lastDescriptors`, and potentially into an audit record would be storing
+ * a credential for no reason at all.
+ *
+ * Falls back to a truncated raw string when the URL will not parse - a
+ * descriptor is never worth throwing over.
+ */
+function minimizeUrl(href: string): string {
+  try {
+    const url = new URL(href);
+    return capped(`${url.origin}${url.pathname}`, MAX.pageUrl) ?? '';
+  } catch {
+    return capped(href, MAX.pageUrl) ?? '';
+  }
+}
+
 export interface ScanOptions {
   ats: ATSKind;
   /** Root to scan. Defaults to the whole document; a MutationObserver rescan
@@ -215,48 +298,59 @@ function describeElement(
 
   // Assembled without the fingerprint first, then hashed - so the fingerprint
   // is always computed from the finished descriptor and the two cannot drift.
+  // SECURITY: every string below is page-controlled and is capped at its
+  // source. See the MAX table for why truncating here rather than at the
+  // schema is the difference between "one weird field" and "the whole scan
+  // failed validation".
   const base: Omit<FieldDescriptor, 'semanticFingerprint'> = {
     localId: newId('f'),
-    tag,
+    tag: capped(tag, MAX.tag) ?? '',
     kind,
     required: element.hasAttribute('required') || element.getAttribute('aria-required') === 'true',
     disabled:
       element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true',
-    pageUrl: document.location?.href ?? '',
-    hostname: document.location?.hostname ?? '',
+    // Origin + path only - the query string is stripped, see minimizeUrl.
+    pageUrl: minimizeUrl(document.location?.href ?? ''),
+    hostname: capped(document.location?.hostname, MAX.hostname) ?? '',
     ats,
     inIframe: window.self !== window.top,
   };
 
-  if (type !== undefined) base.type = type;
+  const cappedType = capped(type, MAX.type);
+  if (cappedType !== undefined) base.type = cappedType;
 
-  const role = element.getAttribute('role');
-  if (role !== null) base.role = role;
+  const role = capped(element.getAttribute('role'), MAX.role);
+  if (role !== undefined) base.role = role;
 
-  const autocomplete = element.getAttribute('autocomplete');
-  if (autocomplete !== null) base.autocomplete = autocomplete;
+  const autocomplete = capped(element.getAttribute('autocomplete'), MAX.autocomplete);
+  if (autocomplete !== undefined) base.autocomplete = autocomplete;
 
-  if (label !== undefined) base.label = label;
+  const cappedLabel = capped(label, MAX.label);
+  if (cappedLabel !== undefined) base.label = cappedLabel;
 
-  const accessibleName = computeAccessibleName(element, document);
+  const accessibleName = capped(computeAccessibleName(element, document), MAX.accessibleName);
   if (accessibleName !== undefined) base.accessibleName = accessibleName;
 
-  const name = element.getAttribute('name');
-  if (name !== null) base.name = name;
-  if (element.id.length > 0) base.id = element.id;
+  const name = capped(element.getAttribute('name'), MAX.name);
+  if (name !== undefined) base.name = name;
 
-  const placeholder = element.getAttribute('placeholder');
-  if (placeholder !== null) base.placeholder = placeholder;
+  const id = capped(element.id, MAX.id);
+  if (id !== undefined && id.length > 0) base.id = id;
+
+  const placeholder = capped(element.getAttribute('placeholder'), MAX.placeholder);
+  if (placeholder !== undefined) base.placeholder = placeholder;
 
   if (options !== undefined) base.options = options;
 
+  // Already bounded by the runtime budget (<= 400 chars), which is well under
+  // the schema's 1024.
   const nearby = collectNearbyText(element, maxNearbyTextChars);
   if (nearby !== undefined) base.nearbyText = nearby;
 
-  const heading = findSectionHeading(element);
+  const heading = capped(findSectionHeading(element), MAX.sectionHeading);
   if (heading !== undefined) base.sectionHeading = heading;
 
-  const currentValue = readCurrentValue(element);
+  const currentValue = capped(readCurrentValue(element), MAX.currentValue);
   if (currentValue !== undefined) base.currentValue = currentValue;
 
   const maxLength = element.getAttribute('maxlength');
@@ -435,18 +529,38 @@ function computeAccessibleName(element: HTMLElement, _document: Document): strin
   return cleanText(legend?.textContent);
 }
 
-/** Options for a select, listbox, or ARIA combobox. */
+/**
+ * Options for a select, listbox, or ARIA combobox.
+ *
+ * SECURITY / MEMORY: capped at MAX_OPTIONS_PER_FIELD, and the cap is applied
+ * DURING the walk rather than by slicing afterwards. A page with a synthetic
+ * 100,000-option `<select>` therefore costs 500 allocations, not 100,000 -
+ * and, before this cap existed, produced a descriptor the message schema
+ * rejected, which failed the whole scan rather than this one control.
+ */
 function collectOptions(element: HTMLElement, kind: ControlKind): FieldOption[] | undefined {
   if (element instanceof HTMLSelectElement) {
-    return [...element.options]
+    const collected: FieldOption[] = [];
+    // Indexed loop over the live HTMLOptionsCollection: no intermediate array
+    // copy of every option before filtering, which is what `[...element.options]`
+    // was doing.
+    for (let index = 0; index < element.options.length; index++) {
+      if (collected.length >= MAX_OPTIONS_PER_FIELD) break;
+      const option = element.options[index];
+      if (option === undefined) continue;
+
+      const text = cleanText(option.textContent);
       // A leading "Select..." placeholder is not an answer. Offering it as one
       // would let the resolver "successfully" choose the empty option.
-      .filter((option) => option.value !== '' || cleanText(option.textContent) !== undefined)
-      .map((option) => ({
-        value: option.value,
-        label: cleanText(option.textContent) ?? option.value,
+      if (option.value === '' && text === undefined) continue;
+
+      collected.push({
+        value: capped(option.value, MAX.optionValue) ?? '',
+        label: capped(text ?? option.value, MAX.optionLabel) ?? '',
         selected: option.selected,
-      }));
+      });
+    }
+    return collected;
   }
 
   if (kind === 'combobox') {
@@ -457,14 +571,16 @@ function collectOptions(element: HTMLElement, kind: ControlKind): FieldOption[] 
     // A custom dropdown usually renders its options only while open, so an
     // empty list here is expected, not an error - the fill adapter opens the
     // control and reads them at fill time.
-    const options = [...listbox.querySelectorAll('[role="option"]')]
-      .map((option) => {
-        const label = cleanText(option.textContent);
-        return label === undefined
-          ? null
-          : { value: option.getAttribute('data-value') ?? label, label };
-      })
-      .filter((option): option is FieldOption => option !== null);
+    const options: FieldOption[] = [];
+    for (const option of listbox.querySelectorAll('[role="option"]')) {
+      if (options.length >= MAX_OPTIONS_PER_FIELD) break;
+      const label = cleanText(option.textContent);
+      if (label === undefined) continue;
+      options.push({
+        value: capped(option.getAttribute('data-value') ?? label, MAX.optionValue) ?? '',
+        label: capped(label, MAX.optionLabel) ?? '',
+      });
+    }
 
     return options.length > 0 ? options : undefined;
   }
@@ -490,12 +606,71 @@ function collectNearbyText(element: HTMLElement, maxChars: number): string | und
   );
   if (container === null) return undefined;
 
-  const clone = container.cloneNode(true) as HTMLElement;
-  for (const child of clone.querySelectorAll('input, select, textarea, option, script, style')) {
-    child.remove();
+  /**
+   * PERFORMANCE FIX (this was a real hang, not a theoretical one).
+   *
+   * This function used to do:
+   *
+   *     const clone = container.cloneNode(true);          // deep copy
+   *     clone.querySelectorAll('input, ...').forEach(remove);
+   *     cleanText(clone.textContent);
+   *
+   * which is O(size of the container subtree) PER FIELD. When many controls
+   * share one large container - a `<fieldset>` holding a big radio group, a
+   * long `<div>` wrapping a whole application section - that is quadratic in
+   * the size of the page, executed on the host page's main thread. A fieldset
+   * with 3,000 radios meant ~9,000,000 node clones and a hung tab. It
+   * reproduced on the first hostile-page test written against it.
+   *
+   * The replacement is a TreeWalker that reads text nodes directly and STOPS
+   * as soon as it has `maxChars`. No copy is made, nothing is mutated, and the
+   * cost is O(maxChars) - roughly 300 characters - regardless of how large the
+   * container is. `visited` bounds the pathological case where a huge subtree
+   * contains almost no text.
+   */
+  const MAX_NODES_VISITED = 400;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Node): number {
+      // Reject text that belongs to a control (an option list, a value) or to
+      // a script/style block - the same exclusions the clone made, done
+      // without building a clone.
+      const parent = node.parentElement;
+      if (parent === null) return NodeFilter.FILTER_REJECT;
+      const tag = parent.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'SELECT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'OPTION' ||
+        tag === 'SCRIPT' ||
+        tag === 'STYLE'
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const parts: string[] = [];
+  let length = 0;
+  let visited = 0;
+
+  // Accumulate into an array and join once: repeated `+=` on a growing string
+  // is what makes this kind of loop quietly quadratic in some engines.
+  while (length < maxChars && visited < MAX_NODES_VISITED) {
+    const node = walker.nextNode();
+    if (node === null) break;
+    visited++;
+
+    const raw = node.nodeValue;
+    if (raw === null || raw.trim().length === 0) continue;
+
+    parts.push(raw);
+    length += raw.length;
   }
 
-  const text = cleanText(clone.textContent);
+  const text = cleanText(parts.join(' '));
   if (text === undefined) return undefined;
   return text.length > maxChars ? text.slice(0, maxChars) : text;
 }
@@ -554,8 +729,8 @@ function mergeRadioOption(
   const groupName = descriptor.name;
   if (groupName === undefined) return;
 
-  const optionLabel = descriptor.label ?? descriptor.accessibleName ?? '';
-  const optionValue = element.getAttribute('value') ?? optionLabel;
+  const optionLabel = capped(descriptor.label ?? descriptor.accessibleName ?? '', MAX.optionLabel) ?? '';
+  const optionValue = capped(element.getAttribute('value') ?? optionLabel, MAX.optionValue) ?? '';
   const option: FieldOption = {
     value: optionValue,
     label: optionLabel,
@@ -564,7 +739,18 @@ function mergeRadioOption(
 
   const existing = groups.get(groupName);
   if (existing !== undefined) {
-    existing.options = [...(existing.options ?? []), option];
+    /**
+     * PERFORMANCE + SECURITY: push, do not re-spread.
+     *
+     * This was `existing.options = [...(existing.options ?? []), option]`,
+     * which copies the whole array once per radio - O(n^2) over a group. A page
+     * with 20,000 radios sharing one `name` (trivial to render) turned a scan
+     * into ~200 million copies on the host page's main thread, which is a
+     * hung tab, not a slow one. The cap then bounds the group so a descriptor
+     * cannot exceed what the message schema will accept.
+     */
+    if (existing.options === undefined) existing.options = [option];
+    else if (existing.options.length < MAX_OPTIONS_PER_FIELD) existing.options.push(option);
     return;
   }
 
