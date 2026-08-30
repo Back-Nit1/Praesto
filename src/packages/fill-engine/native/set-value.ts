@@ -37,32 +37,38 @@
  */
 
 /**
- * Cached native setters, looked up once per element type.
+ * Cached native setters, looked up once per element TYPE.
  *
  * `Object.getOwnPropertyDescriptor` on the PROTOTYPE gives the browser's own
  * setter, before any framework had a chance to shadow it on the instance.
  * Cached because the lookup is not free and a fill run touches many controls.
+ *
+ * The cache stores the UNBOUND setter, and the caller supplies the element at
+ * call time. Caching a bound setter instead would be a serious bug: the cache
+ * is keyed by prototype, so every input on the page would share one entry, and
+ * every fill after the first would write into whichever element happened to be
+ * filled first. The symptom is one correct field and a page of empty ones.
+ *
+ * A `null` entry means "we looked and this prototype has no value setter",
+ * which is distinct from "not yet looked up" and must not be re-probed.
  */
-const nativeSetters = new WeakMap<object, ((value: string) => void) | undefined>();
+const nativeSetters = new WeakMap<object, ((this: HTMLElement, value: string) => void) | null>();
 
-function nativeValueSetter(element: HTMLElement): ((value: string) => void) | undefined {
+function nativeValueSetter(
+  element: HTMLElement,
+): ((this: HTMLElement, value: string) => void) | undefined {
   const prototype = Object.getPrototypeOf(element) as object | null;
   if (prototype === null) return undefined;
 
-  const cached = nativeSetters.get(prototype);
-  if (cached !== undefined) return cached;
+  if (nativeSetters.has(prototype)) {
+    return nativeSetters.get(prototype) ?? undefined;
+  }
 
   const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
   const setter = descriptor?.set;
-  const bound =
-    setter === undefined
-      ? undefined
-      : (value: string) => {
-          setter.call(element, value);
-        };
 
-  nativeSetters.set(prototype, bound);
-  return bound;
+  nativeSetters.set(prototype, setter ?? null);
+  return setter;
 }
 
 /**
@@ -76,7 +82,9 @@ export function setNativeValue(element: HTMLElement, value: string): boolean {
   const setter = nativeValueSetter(element);
 
   if (setter !== undefined) {
-    setter(value);
+    // `.call` supplies the element the cached setter was deliberately not
+    // bound to. See the cache comment above.
+    setter.call(element, value);
   } else if ('value' in element) {
     // No prototype descriptor (a custom element, or an unusual DOM
     // implementation). Direct assignment is the only option left; the event

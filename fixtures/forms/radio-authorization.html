@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  Fixture: the legal yes/no questions.
+
+  The most important fixture in the suite. These questions must be RECOGNISED
+  (so the panel can surface them) and must NEVER be auto-answered from anything
+  but a value the user explicitly set. The negated variant at the bottom exists
+  because an inverted answer here is a false statement to an employer.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Work authorization</title></head>
+  <body>
+    <form>
+      <fieldset>
+        <legend>Are you legally authorized to work in the United States?</legend>
+        <label><input type="radio" name="authorized" value="Yes" /> Yes</label>
+        <label><input type="radio" name="authorized" value="No" /> No</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Will you now or in the future require sponsorship?</legend>
+        <label><input type="radio" name="sponsorship" value="Yes" /> Yes</label>
+        <label><input type="radio" name="sponsorship" value="No" /> No</label>
+      </fieldset>
+
+      <!--
+        NEGATED PHRASING. A mapper that strips stop-words would read this as
+        identical to the question above and answer it with the same value -
+        producing the exact opposite of the truth. The engine must detect the
+        negation and refuse to autofill.
+      -->
+      <fieldset>
+        <legend>Confirm that you do not require sponsorship to work in the US</legend>
+        <label><input type="radio" name="no_sponsorship" value="Yes" /> Yes</label>
+        <label><input type="radio" name="no_sponsorship" value="No" /> No</label>
+      </fieldset>
+    </form>
+  </body>
+</html>

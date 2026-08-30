@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Fixture: a plain, well-marked-up contact section.
+
+  This is the easy case, and it exists as a regression floor: if the engine ever
+  fails to map THESE fields, something fundamental has broken. Markup style is
+  deliberately varied - explicit <label for>, an aria-label, a bare placeholder -
+  so a change that accidentally depends on one labelling style is caught here.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Basic contact</title></head>
+  <body>
+    <h1>Apply for Software Engineer</h1>
+    <form>
+      <fieldset>
+        <legend>Your information</legend>
+
+        <!-- Explicit label + autocomplete. The strongest possible case. -->
+        <label for="first">First Name *</label>
+        <input id="first" name="first_name" type="text" autocomplete="given-name" required />
+
+        <label for="last">Last Name *</label>
+        <input id="last" name="last_name" type="text" autocomplete="family-name" required />
+
+        <!-- Rails-style namespaced name, no autocomplete. -->
+        <label for="email">Email</label>
+        <input id="email" name="job_application[email]" type="email" required />
+
+        <!-- Label carries a colon; the normalizer must treat it as decoration. -->
+        <label for="phone">Phone Number:</label>
+        <input id="phone" name="phone" type="tel" placeholder="(555) 000-0000" />
+
+        <!-- No <label> element at all - only an aria-label. -->
+        <input
+          id="linkedin"
+          name="urls[LinkedIn]"
+          type="url"
+          aria-label="LinkedIn Profile URL"
+        />
+
+        <!-- Placeholder only. The weakest labelling a real form uses. -->
+        <input id="github" name="github_url" type="url" placeholder="GitHub" />
+      </fieldset>
+
+      <!--
+        Never fill: the extension must not submit, and must not type into a
+        button. Present so the scanner's exclusion of action inputs is tested.
+      -->
+      <input type="hidden" name="authenticity_token" value="should-never-be-touched" />
+      <button type="submit">Submit application</button>
+    </form>
+  </body>
+</html>

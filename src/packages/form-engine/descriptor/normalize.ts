@@ -49,11 +49,17 @@ export function normalizeLabel(input: string | null | undefined): string {
       .replace(/[*\u2217\u066D]/g, ' ')
       // Parenthetical decoration that never carries the question's meaning.
       .replace(/\((?:required|optional|opcional)\)/gi, ' ')
-      // Typographic quotes and dashes to their ASCII equivalents, so
-      // "Bachelor's" and "Bachelor's" are one string.
+      // Typographic quotes to their ASCII equivalents first, so a curly and a
+      // straight apostrophe are handled identically from here on.
       .replace(/[\u2018\u2019\u201B]/g, "'")
       .replace(/[\u201C\u201D]/g, '"')
       .replace(/[\u2010-\u2015]/g, '-')
+      // Apostrophes are DELETED rather than turned into a space, so
+      // "Bachelor's Degree" becomes "bachelors degree" and not "bachelor s
+      // degree". The stray one-letter token the space version produces is not
+      // harmless: it inflates the vocabulary that token-overlap scoring divides
+      // by, so it would quietly lower the similarity of every possessive label.
+      .replace(/'/g, '')
       // Remaining punctuation becomes a space rather than being deleted, so
       // "e-mail" -> "e mail" rather than "email". Which of those is right is
       // handled explicitly below, where we can be deliberate about it.
@@ -64,7 +70,7 @@ export function normalizeLabel(input: string | null | undefined): string {
       // one. Splitting is the transformation that is always safe; joining is
       // handled separately by `normalizeCompact`, which is scored lower
       // precisely because it is lossy.
-      .replace(/[-:;,.?!"'`|\\/_\[\]{}()<>+#@]/g, ' ')
+      .replace(/[-:;,.?!"`|\\/_\[\]{}()<>+#@]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
   );

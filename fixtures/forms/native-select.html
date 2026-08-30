@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  Fixture: option-based controls.
+
+  Covers the matching hazards: an option list whose official name is longer than
+  our stored value, a state list containing a superstring of another state, and
+  a graduation date split across two dropdowns.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Selects</title></head>
+  <body>
+    <form>
+      <label for="country">Country</label>
+      <select id="country" name="country">
+        <option value="">Select...</option>
+        <option value="CA">Canada</option>
+        <!-- Longer official name; must still match a stored "United States". -->
+        <option value="US">United States of America</option>
+      </select>
+
+      <label for="state">State</label>
+      <select id="state" name="state">
+        <option value="">Select...</option>
+        <!-- "Virginia" must NOT select this. Prefix, not substring, matching. -->
+        <option value="WV">West Virginia</option>
+        <option value="VA">Virginia</option>
+      </select>
+
+      <fieldset>
+        <legend>Education</legend>
+        <label for="grad-month">Graduation month</label>
+        <select id="grad-month" name="grad_month">
+          <option value="">Month</option>
+          <option value="5">May</option>
+          <option value="6">June</option>
+        </select>
+
+        <label for="grad-year">Graduation year</label>
+        <select id="grad-year" name="grad_year">
+          <option value="">Year</option>
+          <option value="2026">2026</option>
+          <option value="2027">2027</option>
+        </select>
+      </fieldset>
+    </form>
+  </body>
+</html>

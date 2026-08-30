@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Fixture: fields the engine must NOT confidently fill.
+
+  Every entry here is a near-miss designed to catch over-eager matching. A
+  regression that starts filling any of these is a correctness bug, not a
+  feature - which is why they live in their own fixture rather than being
+  scattered through the happy-path ones.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Ambiguous</title></head>
+  <body>
+    <form>
+      <!-- Contains "phone number" but is somebody else's phone number. -->
+      <label for="ec">Emergency contact phone number</label>
+      <input id="ec" name="emergency_contact_phone_number" type="tel" />
+
+      <!-- Contains "email" but belongs to a reference, not the applicant. -->
+      <label for="ref">Reference email address</label>
+      <input id="ref" name="reference_email" type="email" />
+
+      <!-- "Start date" with no section heading: education or employment? -->
+      <label for="start">Start date</label>
+      <input id="start" name="start_date" type="text" />
+
+      <!-- A genuinely open-ended question. Phase 8 territory, not autofill. -->
+      <label for="essay">Describe a technically challenging project you led</label>
+      <textarea id="essay" name="q_open_1" rows="6"></textarea>
+
+      <!-- Already filled by the user. Must never be overwritten. -->
+      <label for="prefilled">Email</label>
+      <input id="prefilled" name="email_2" type="email" value="already@typed.example" />
+    </form>
+  </body>
+</html>
