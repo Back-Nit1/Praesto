@@ -25,3 +25,8 @@ dist/
 
 # Working notes, not deliverables. Kept out of the repo by request.
 engineering.md
+
+# The security model document. Deliberately NOT committed: it is the written
+# threat model and the map of every trust boundary, and this repository may not
+# stay private. Keep it beside the code, share it deliberately.
+Security.md

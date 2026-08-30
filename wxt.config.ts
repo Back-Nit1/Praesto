@@ -117,7 +117,7 @@ export default defineConfig({
     side_panel: { default_path: 'sidepanel.html' },
 
     /**
-     * CONTENT SECURITY POLICY - see SECURITY.md section 3.
+     * CONTENT SECURITY POLICY - see Security.md section 3.
      *
      * Was `script-src 'self'; object-src 'self';`. The additions are the ones
      * that matter for an extension holding a person's identity documents:
@@ -131,7 +131,7 @@ export default defineConfig({
      *                When the chat interface lands, add YOUR BACKEND ORIGIN
      *                here and nothing else. Do not add a model provider's
      *                origin: calling one directly means the API key is in the
-     *                client, which SECURITY.md section 2 rules out.
+     *                client, which Security.md section 2 rules out.
      *
      *  frame-ancestors 'none'  nothing may embed our pages. Chrome already
      *                blocks this for non-web-accessible resources, so this is

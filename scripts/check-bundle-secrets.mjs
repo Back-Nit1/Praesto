@@ -18,7 +18,7 @@
  *
  * There is no way to hold a shared API key inside an extension. The only
  * architecture that works is a small backend that holds the key and that the
- * extension calls with a per-user credential - see SECURITY.md.
+ * extension calls with a per-user credential - see Security.md.
  *
  * WHAT THIS SCRIPT DOES
  * Fails the build if a bundled file contains something shaped like a key. It is
@@ -149,7 +149,7 @@ function main() {
   }
   console.error(
     '\nA published extension bundle is public. Move the key behind a backend proxy;\n' +
-      'see SECURITY.md ("Why an API key cannot live in the extension").\n',
+      'see Security.md ("Why an API key cannot live in the extension").\n',
   );
   process.exit(1);
 }
