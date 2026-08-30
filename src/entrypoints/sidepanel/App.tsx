@@ -21,14 +21,30 @@
  * numbers, mapping reasons and fingerprints live in the options-page playground
  * and not here.
  *
+ * THE PANEL NEVER ASSERTS AN OUTCOME IT WAS NOT TOLD
+ * This screen previously moved to "Filled" the moment a fill was DISPATCHED,
+ * without reading the reply. That is the one bug that destroys the product's
+ * whole premise: a user who is told thirteen fields were filled, and finds two
+ * of them empty on submit, has to check all thirteen forever afterwards. Every
+ * row's state now comes from the per-field verification the fill engine
+ * actually performed, and a field that failed says so and says why.
+ *
  * NOTHING FILLS WITHOUT A CLICK
  * Scanning happens on request. Filling happens on a separate, explicit click.
  * There is no auto-fill-on-load path, and spec section 21.4 forbids submitting
  * the form under any circumstances.
  */
-import { useCallback, useState, type ReactNode } from 'react';
-import { Button, StateBadge, StatusLine } from '@/components/ui';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Button, StateBadge, StatusLine, type FieldState } from '@/components/ui';
 import type { ResolvedFieldAction } from '@shared/messages';
+import {
+  describeFillFailure,
+  type ContentErrorResponse,
+  type ContentFillResponse,
+  type ContentScanResponse,
+  type FieldFillReport,
+  type ResumePayload,
+} from '@shared/page-protocol';
 import { createLogger } from '@shared/logging';
 import { labelForPath, SCALAR_PROFILE_PATHS } from '@profile/paths';
 import type { MappingScope } from '@learning/types';
@@ -52,9 +68,7 @@ const resumes = new ResumeDocumentStore();
  * IndexedDB directly. The content script cannot: `indexedDB` there is the
  * PAGE's database, not ours - which is exactly the isolation we want.
  */
-async function loadResumePayload(): Promise<
-  { name: string; type: string; base64: string } | undefined
-> {
+async function loadResumePayload(): Promise<ResumePayload | undefined> {
   const saved = await settings.get<string>(DEFAULT_RESUME_KEY);
   if (!saved.ok || saved.value === undefined) return undefined;
 
@@ -77,12 +91,26 @@ async function loadResumePayload(): Promise<
 
 const log = createLogger('sidepanel');
 
+/**
+ * What the panel knows right now.
+ *
+ * Note there is no `filled` state. "Filled" is not a state of the PANEL, it is
+ * a property of individual fields, and it is carried by `outcomes` - keyed by
+ * localId - so a run that filled eleven of thirteen fields can say exactly
+ * that. A single boolean could only ever say "we tried".
+ */
 type PanelState =
   | { kind: 'idle' }
   | { kind: 'scanning' }
-  | { kind: 'scanned'; actions: ResolvedFieldAction[] }
-  | { kind: 'filled'; actions: ResolvedFieldAction[] }
-  | { kind: 'error'; message: string };
+  | {
+      kind: 'scanned';
+      actions: ResolvedFieldAction[];
+      /** Controls the scan found, which is not the same as actions produced. */
+      fieldsDetected: number;
+      /** localId -> what actually happened. Absent until a fill has run. */
+      outcomes: Record<string, FieldFillReport>;
+    }
+  | { kind: 'error'; message: string; code?: string };
 
 export function App(): ReactNode {
   const [state, setState] = useState<PanelState>({ kind: 'idle' });
@@ -90,6 +118,29 @@ export function App(): ReactNode {
   const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
     kind: 'idle',
   });
+  /** Set when the page revealed new questions after the last scan. */
+  const [pageChanged, setPageChanged] = useState(false);
+
+  /**
+   * Listen for the scanner's "this form changed" broadcast.
+   *
+   * Conditional questions are the norm on real applications ("Do you require
+   * sponsorship?" reveals three more fields). Without this the panel silently
+   * shows a stale list and the newly revealed questions are simply missed.
+   * It offers a rescan; it never rescans or fills on its own.
+   */
+  useEffect(() => {
+    const listener = (message: unknown): undefined => {
+      if ((message as { type?: string } | null)?.type === 'PAGE_FIELDS_CHANGED') {
+        setPageChanged(true);
+      }
+      // Explicitly NOT returning true: this listener never answers, and
+      // claiming the channel would leave the sender waiting for a reply.
+      return undefined;
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
 
   /**
    * Ensure the scanner is present in the active tab, then message it.
@@ -131,15 +182,17 @@ export function App(): ReactNode {
     }
   }, []);
 
-  async function handleScan(): Promise<void> {
+  const handleScan = useCallback(async (): Promise<void> => {
     setBusy(true);
+    setStatus({ kind: 'idle' });
     setState({ kind: 'scanning' });
 
-    const response = await sendToActiveTab<{ ok: boolean; actions?: ResolvedFieldAction[] }>({
+    const response = await sendToActiveTab<ContentScanResponse | ContentErrorResponse>({
       type: 'CONTENT_SCAN',
     });
 
     setBusy(false);
+    setPageChanged(false);
 
     if (response === undefined) {
       setState({
@@ -149,13 +202,22 @@ export function App(): ReactNode {
       });
       return;
     }
-    if (!response.ok || response.actions === undefined) {
-      setState({ kind: 'error', message: 'This page could not be scanned.' });
+
+    if (!response.ok) {
+      // The code travels all the way from the service worker precisely so this
+      // branch can tell "you have not made a profile yet" apart from "the
+      // extension broke". They need different words and different next steps.
+      setState({ kind: 'error', message: response.message, code: response.code });
       return;
     }
 
-    setState({ kind: 'scanned', actions: response.actions });
-  }
+    setState({
+      kind: 'scanned',
+      actions: response.actions,
+      fieldsDetected: response.fieldsDetected,
+      outcomes: {},
+    });
+  }, [sendToActiveTab]);
 
   /**
    * Teach the system what a field means.
@@ -196,12 +258,22 @@ export function App(): ReactNode {
     await handleScan();
   }
 
-  async function handleFill(actions: ResolvedFieldAction[]): Promise<void> {
+  /**
+   * Run a fill for a specific set of actions and record what happened.
+   *
+   * Takes the actions explicitly rather than reading them from state because
+   * this same path serves three different user intents - "fill everything
+   * safe", "fill all the suggestions", "fill just this one" - and they differ
+   * only in which actions they pass.
+   */
+  async function handleFill(requested: ResolvedFieldAction[]): Promise<void> {
+    if (requested.length === 0) return;
     setBusy(true);
+    setStatus({ kind: 'idle' });
 
     // Only loaded when the page actually has a resume field. Otherwise we would
     // push the applicant's document into a webpage's context for no reason.
-    const needsResume = actions.some((action) => action.action === 'attach_resume');
+    const needsResume = requested.some((action) => action.action === 'attach_resume');
     const resume = needsResume ? await loadResumePayload() : undefined;
 
     if (needsResume && resume === undefined) {
@@ -211,19 +283,46 @@ export function App(): ReactNode {
       });
     }
 
-    await sendToActiveTab({
+    const response = await sendToActiveTab<ContentFillResponse | ContentErrorResponse>({
       type: 'CONTENT_FILL',
-      // Only the safe ones cross. Sending `suggest` actions and filtering in the
-      // page would put the policy decision in two places, and the page context
-      // is the one place it must never live.
-      actions: actions.filter(
-        (action) => action.action === 'fill' || action.action === 'attach_resume',
-      ),
+      actions: requested,
       ...(resume !== undefined ? { resume } : {}),
     });
 
     setBusy(false);
-    setState({ kind: 'filled', actions });
+
+    if (response === undefined || !response.ok) {
+      setStatus({
+        kind: 'error',
+        message:
+          response === undefined
+            ? 'The page stopped responding. Rescan and try again.'
+            : response.message,
+      });
+      return;
+    }
+
+    // Merge rather than replace: accepting one suggestion after a bulk fill
+    // must not erase the record of what that bulk fill did.
+    setState((current) => {
+      if (current.kind !== 'scanned') return current;
+      const outcomes = { ...current.outcomes };
+      for (const outcome of response.outcomes) outcomes[outcome.localId] = outcome;
+      return { ...current, outcomes };
+    });
+
+    const verified = response.outcomes.filter((outcome) => outcome.verified).length;
+    const failed = response.outcomes.length - verified;
+
+    // The summary states the failures out loud. A count that silently omits
+    // them is the same lie as the old "Filled" badge, just smaller.
+    setStatus({
+      kind: failed === 0 ? 'ok' : 'error',
+      message:
+        failed === 0
+          ? `${verified} field${verified === 1 ? '' : 's'} filled and verified.`
+          : `${verified} filled, ${failed} could not be filled - see below.`,
+    });
   }
 
   return (
@@ -244,7 +343,7 @@ export function App(): ReactNode {
           <p className="text-zinc-600 dark:text-zinc-400">
             Open a job application, then scan it. Nothing is filled until you ask.
           </p>
-          <Button onClick={handleScan} disabled={busy}>
+          <Button onClick={() => void handleScan()} disabled={busy}>
             Scan this page
           </Button>
         </div>
@@ -253,26 +352,75 @@ export function App(): ReactNode {
       {state.kind === 'scanning' && <p className="text-zinc-500">Reading the form...</p>}
 
       {state.kind === 'error' && (
-        <div className="space-y-3">
-          <StatusLine status={{ kind: 'error', message: state.message }} />
-          <Button variant="secondary" onClick={handleScan} disabled={busy}>
-            Try again
-          </Button>
-        </div>
+        <ScanError message={state.message} code={state.code} busy={busy} onRetry={handleScan} />
       )}
 
       <StatusLine status={status} />
 
-      {(state.kind === 'scanned' || state.kind === 'filled') && (
+      {pageChanged && state.kind === 'scanned' && (
+        <div className="my-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+          <p className="mb-1">This form changed - it may be showing questions we have not read.</p>
+          <Button variant="secondary" onClick={() => void handleScan()} disabled={busy}>
+            Rescan
+          </Button>
+        </div>
+      )}
+
+      {state.kind === 'scanned' && (
         <ScanReport
           actions={state.actions}
-          filled={state.kind === 'filled'}
+          fieldsDetected={state.fieldsDetected}
+          outcomes={state.outcomes}
           busy={busy}
-          onFill={() => void handleFill(state.actions)}
-          onRescan={handleScan}
+          onFill={(requested) => void handleFill(requested)}
+          onRescan={() => void handleScan()}
           onCorrect={(localId, path, scope) => void handleCorrect(localId, path, scope)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * A scan that could not produce a field list, explained.
+ *
+ * A missing profile is the one failure with an obvious next step, so it gets a
+ * button rather than a sentence. Telling a first-time user "no application form
+ * detected" - which is what this code path used to do - is both wrong and
+ * unactionable.
+ */
+function ScanError({
+  message,
+  code,
+  busy,
+  onRetry,
+}: {
+  message: string;
+  /** `| undefined` explicitly, because `exactOptionalPropertyTypes` treats an
+   *  optional property and one that may hold undefined as different types. */
+  code: string | undefined;
+  busy: boolean;
+  onRetry: () => Promise<void>;
+}): ReactNode {
+  if (code === 'PROFILE_NOT_FOUND') {
+    return (
+      <div className="space-y-3 rounded border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+        <p className="font-medium">Set up your profile first</p>
+        <p className="text-zinc-600 dark:text-zinc-400">
+          The extension has nothing to fill this form with yet. Add your details - or import a
+          resume - and it will take about two minutes, once.
+        </p>
+        <Button onClick={() => void chrome.runtime.openOptionsPage()}>Open my profile</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <StatusLine status={{ kind: 'error', message }} />
+      <Button variant="secondary" onClick={() => void onRetry()} disabled={busy}>
+        Try again
+      </Button>
     </div>
   );
 }
@@ -287,16 +435,18 @@ export function App(): ReactNode {
  */
 function ScanReport({
   actions,
-  filled,
+  fieldsDetected,
+  outcomes,
   busy,
   onFill,
   onRescan,
   onCorrect,
 }: {
   actions: ResolvedFieldAction[];
-  filled: boolean;
+  fieldsDetected: number;
+  outcomes: Record<string, FieldFillReport>;
   busy: boolean;
-  onFill: () => void;
+  onFill: (actions: ResolvedFieldAction[]) => void;
   onRescan: () => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
@@ -306,10 +456,20 @@ function ScanReport({
   const review = actions.filter((action) => action.action === 'suggest');
   const skipped = actions.filter((action) => action.action === 'skip');
 
+  /** Fields we have already attempted, so a second click does not redo them. */
+  const attempted = (candidates: ResolvedFieldAction[]): ResolvedFieldAction[] =>
+    candidates.filter((action) => outcomes[action.localId] !== undefined);
+
+  const remainingReady = ready.filter((action) => outcomes[action.localId] === undefined);
+
   if (actions.length === 0) {
     return (
       <div className="space-y-3">
-        <p className="text-zinc-600 dark:text-zinc-400">No application form detected.</p>
+        <p className="text-zinc-600 dark:text-zinc-400">
+          {fieldsDetected === 0
+            ? 'No application form detected on this page.'
+            : `${fieldsDetected} fields found, but none of them matched anything in your profile.`}
+        </p>
         <Button variant="secondary" onClick={onRescan} disabled={busy}>
           Scan again
         </Button>
@@ -317,18 +477,30 @@ function ScanReport({
     );
   }
 
+  const verifiedCount = Object.values(outcomes).filter((outcome) => outcome.verified).length;
+  const failedCount = Object.values(outcomes).length - verifiedCount;
+
   return (
     <div className="space-y-4">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
-        <Stat label="Fields detected" value={actions.length} />
+        <Stat label="Fields detected" value={fieldsDetected} />
         <Stat label="Ready to fill" value={ready.length} />
         <Stat label="Need review" value={review.length} />
         <Stat label="Not recognised" value={skipped.length} />
+        {/* Only shown once a fill has run, and always shows BOTH numbers. */}
+        {Object.keys(outcomes).length > 0 && (
+          <>
+            <Stat label="Filled and verified" value={verifiedCount} />
+            <Stat label="Could not be filled" value={failedCount} />
+          </>
+        )}
       </dl>
 
-      <div className="flex gap-2">
-        <Button onClick={onFill} disabled={busy || ready.length === 0 || filled}>
-          {filled ? 'Filled' : `Fill ${ready.length} safe field${ready.length === 1 ? '' : 's'}`}
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => onFill(remainingReady)} disabled={busy || remainingReady.length === 0}>
+          {remainingReady.length === 0 && attempted(ready).length > 0
+            ? 'Safe fields done'
+            : `Fill ${remainingReady.length} safe field${remainingReady.length === 1 ? '' : 's'}`}
         </Button>
         <Button variant="secondary" onClick={onRescan} disabled={busy}>
           Rescan
@@ -345,25 +517,40 @@ function ScanReport({
         <ActionGroup
           title="Needs your review"
           actions={review}
-          state="needs_review"
+          outcomes={outcomes}
+          onFill={onFill}
           onCorrect={onCorrect}
+          busy={busy}
+          /* A suggestion is a value we are not confident enough to write on our
+             own authority. The user supplying that authority - by reading it
+             and clicking - is exactly what this button is for, and without it
+             the review list is a dead end that can only be acted on by
+             retyping. */
+          bulkAction={{
+            label: `Fill all ${review.length} suggestion${review.length === 1 ? '' : 's'}`,
+            actions: review.filter((action) => outcomes[action.localId] === undefined),
+          }}
         />
       )}
       {ready.length > 0 && (
         <ActionGroup
-          title={filled ? 'Filled' : 'Ready'}
+          title="Ready"
           actions={ready}
-          state="verified"
+          outcomes={outcomes}
+          onFill={onFill}
           onCorrect={onCorrect}
+          busy={busy}
         />
       )}
       {skipped.length > 0 && (
         <ActionGroup
           title="Left alone"
           actions={skipped}
-          state="missing"
-          collapsed
+          outcomes={outcomes}
+          onFill={onFill}
           onCorrect={onCorrect}
+          busy={busy}
+          collapsed
         />
       )}
     </div>
@@ -382,14 +569,20 @@ function Stat({ label, value }: { label: string; value: number }): ReactNode {
 function ActionGroup({
   title,
   actions,
-  state,
+  outcomes,
+  busy,
   collapsed = false,
+  bulkAction,
+  onFill,
   onCorrect,
 }: {
   title: string;
   actions: ResolvedFieldAction[];
-  state: 'verified' | 'needs_review' | 'missing';
+  outcomes: Record<string, FieldFillReport>;
+  busy: boolean;
   collapsed?: boolean;
+  bulkAction?: { label: string; actions: ResolvedFieldAction[] };
+  onFill: (actions: ResolvedFieldAction[]) => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
   const [open, setOpen] = useState(!collapsed);
@@ -409,34 +602,101 @@ function ActionGroup({
       </button>
 
       {open && (
-        <ul className="space-y-1">
-          {actions.map((action) => (
-            <ActionRow key={action.localId} action={action} state={state} onCorrect={onCorrect} />
-          ))}
-        </ul>
+        <>
+          {bulkAction !== undefined && bulkAction.actions.length > 0 && (
+            <div className="mb-2">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  // Wrapped rather than passed by reference: `map` supplies the
+                  // index as a second argument, which would arrive as the
+                  // edited value and write "0", "1", "2" into the form.
+                  onFill(bulkAction.actions.map((candidate) => asAcceptedFill(candidate)))
+                }
+                disabled={busy}
+              >
+                {bulkAction.label}
+              </Button>
+            </div>
+          )}
+          <ul className="space-y-1">
+            {actions.map((action) => (
+              <ActionRow
+                key={action.localId}
+                action={action}
+                outcome={outcomes[action.localId]}
+                busy={busy}
+                onFill={onFill}
+                onCorrect={onCorrect}
+              />
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );
 }
 
+/**
+ * Turn a suggestion into a fill the user has authorised.
+ *
+ * THE POLICY IS NOT BEING RE-IMPLEMENTED HERE. The confidence policy decided
+ * "do not write this without a human looking at it", and that decision is
+ * honoured: nothing converts a suggestion until a person reads the value and
+ * clicks. What this function encodes is the user's consent, which is precisely
+ * the input the policy was waiting for.
+ *
+ * An edited value drops `optionValue`: that field names an option the RESOLVER
+ * matched, and it would no longer correspond to what the user typed.
+ */
+function asAcceptedFill(action: ResolvedFieldAction, editedValue?: string): ResolvedFieldAction {
+  if (editedValue === undefined) return { ...action, action: 'fill' };
+  const { optionValue: _dropped, ...rest } = action;
+  return { ...rest, action: 'fill', value: editedValue };
+}
 
 /**
- * One field in the audit list, with an inline correction control.
+ * One field in the audit list.
  *
- * The correction affordance is present on EVERY row, not only the uncertain
- * ones. A field the system was confident about can still be wrong, and the user
- * finding out they cannot tell it so is exactly how they stop trusting it.
+ * Three things happen in this row, and they are deliberately all present at
+ * once:
+ *
+ *   - it states what WILL happen, or what DID happen, without embellishment;
+ *   - a suggestion can be accepted (and edited) here, so the review list is
+ *     somewhere the user can finish work rather than a list of things to
+ *     retype elsewhere;
+ *   - any field can be corrected, including one we were confident about. A
+ *     confident field can still be wrong, and a user who finds they cannot say
+ *     so is a user who stops trusting the extension.
  */
 function ActionRow({
   action,
-  state,
+  outcome,
+  busy,
+  onFill,
   onCorrect,
 }: {
   action: ResolvedFieldAction;
-  state: 'verified' | 'needs_review' | 'missing';
+  outcome: FieldFillReport | undefined;
+  busy: boolean;
+  onFill: (actions: ResolvedFieldAction[]) => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string>(
+    typeof action.value === 'string' ? action.value : String(action.value ?? ''),
+  );
+
+  const state = rowState(action, outcome);
+
+  /**
+   * A suggestion can be accepted; a value already written cannot be re-offered.
+   * Option-backed controls (a select, a radio group) are accepted as-is: the
+   * value the user would edit is an option key, not text, and letting them type
+   * over it would produce a value no option matches.
+   */
+  const canAccept = action.action === 'suggest' && outcome === undefined;
+  const canEditValue = canAccept && action.optionValue === undefined && action.value !== undefined;
 
   return (
     <li className="text-xs">
@@ -447,28 +707,91 @@ function ActionRow({
           {action.value !== undefined && (
             <span className="block truncate font-mono text-zinc-500">{String(action.value)}</span>
           )}
+          {/* The failure REASON, in the row that failed. A user who is told
+              only "2 could not be filled" has to guess which two. */}
+          {outcome !== undefined && !outcome.verified && (
+            <span className="block text-amber-700 dark:text-amber-500">
+              {describeFillFailure(outcome.failureReason)}
+            </span>
+          )}
         </span>
-        <button
-          type="button"
-          onClick={() => setEditing((current) => !current)}
-          className="shrink-0 text-blue-600 hover:underline"
-          aria-expanded={editing}
-        >
-          {editing ? 'Cancel' : 'Change'}
-        </button>
+
+        <div className="flex shrink-0 flex-col items-end gap-0.5">
+          {canAccept && (
+            <button
+              type="button"
+              onClick={() => onFill([asAcceptedFill(action)])}
+              disabled={busy}
+              className="text-blue-600 hover:underline disabled:opacity-50"
+            >
+              Fill this
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditing((current) => !current)}
+            className="text-blue-600 hover:underline"
+            aria-expanded={editing}
+          >
+            {editing ? 'Cancel' : 'Change'}
+          </button>
+        </div>
       </div>
 
       {editing && (
-        <CorrectionPicker
-          currentPath={action.profilePath}
-          onSubmit={(path, scope) => {
-            setEditing(false);
-            onCorrect(action.localId, path, scope);
-          }}
-        />
+        <div className="mt-2 space-y-2 rounded border border-zinc-200 p-2 dark:border-zinc-700">
+          {canEditValue && (
+            <label className="block">
+              <span className="mb-1 block text-zinc-500">Use this value</span>
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-1 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-800"
+                />
+                <Button
+                  onClick={() => {
+                    setEditing(false);
+                    onFill([asAcceptedFill(action, draft)]);
+                  }}
+                  disabled={busy}
+                >
+                  Fill
+                </Button>
+              </div>
+            </label>
+          )}
+
+          <CorrectionPicker
+            currentPath={action.profilePath}
+            onSubmit={(path, scope) => {
+              setEditing(false);
+              onCorrect(action.localId, path, scope);
+            }}
+          />
+        </div>
       )}
     </li>
   );
+}
+
+/**
+ * The badge for one row.
+ *
+ * Once a fill has been attempted the OUTCOME is the truth and the intent is
+ * irrelevant - a field we were certain about, which the page then rejected, is
+ * `needs_review`, not `verified`. Before any attempt, the badge reflects what
+ * the policy decided.
+ */
+function rowState(action: ResolvedFieldAction, outcome: FieldFillReport | undefined): FieldState {
+  if (outcome !== undefined) return outcome.verified ? 'verified' : 'needs_review';
+  // Not yet attempted. `high_confidence` is the honest badge for a field we
+  // intend to fill: confident, and not yet proven. Only a read-back earns
+  // `verified`.
+  if (action.action === 'fill' || action.action === 'attach_resume') return 'high_confidence';
+  if (action.action === 'suggest') return 'needs_review';
+  return 'missing';
 }
 
 /**
@@ -504,7 +827,7 @@ function CorrectionPicker({
   ];
 
   return (
-    <div className="mt-2 space-y-2 rounded border border-zinc-200 p-2 dark:border-zinc-700">
+    <div className="space-y-2">
       <label className="block">
         <span className="mb-1 block text-zinc-500">This question is asking for</span>
         <select
