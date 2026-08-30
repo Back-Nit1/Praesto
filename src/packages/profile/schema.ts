@@ -118,10 +118,19 @@ export function profileValue<T extends z.ZodTypeAny>(inner: T) {
   });
 }
 
-/** Runtime-agnostic TypeScript shape of a wrapped value. */
+/**
+ * Runtime-agnostic TypeScript shape of a wrapped value.
+ *
+ * `raw?: string | undefined` rather than `raw?: string` is deliberate. Under
+ * `exactOptionalPropertyTypes` those are DIFFERENT types: the first allows the
+ * property to be present and explicitly undefined, the second does not. Zod's
+ * `.optional()` produces the first, so writing the second here would make this
+ * hand-written interface incompatible with the schema it is supposed to mirror,
+ * and every value produced by parsing would fail to satisfy it.
+ */
 export interface ProfileValue<T> {
   value: T | null;
-  raw?: string;
+  raw?: string | undefined;
   evidence: Evidence[];
 }
 

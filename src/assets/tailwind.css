@@ -1,0 +1,28 @@
+/**
+ * Tailwind v4 entry.
+ *
+ * v4 configures itself from CSS rather than a JS config file, which removes a
+ * build step and a whole category of "the config and the code disagree" bugs.
+ *
+ * The design tokens below are defined once and used by both extension surfaces
+ * (side panel and options page) so they cannot drift apart visually.
+ */
+@import 'tailwindcss';
+
+@theme {
+  /* Semantic colours for the four field states in spec section 9. Named for
+     MEANING, not appearance, so a future restyle changes one line here rather
+     than every component that renders a state badge. */
+  --color-state-verified: oklch(0.62 0.15 155);
+  --color-state-confident: oklch(0.6 0.13 250);
+  --color-state-review: oklch(0.72 0.15 75);
+  --color-state-missing: oklch(0.6 0.01 260);
+}
+
+/* The extension's own surfaces follow the user's OS theme. A side panel that
+   is blinding white next to a dark browser is a real usability complaint. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}

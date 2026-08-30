@@ -127,8 +127,8 @@ export function mapField(
     // The attribute may carry section/billing tokens ("shipping given-name").
     // The meaning is in the last token; the rest is address-context we ignore.
     const tokens = descriptor.autocomplete.toLowerCase().trim().split(/\s+/);
-    const meaningful = tokens[tokens.length - 1];
-    const mapped = meaningful === undefined ? undefined : AUTOCOMPLETE_MAP[meaningful];
+    const meaningful = tokens[tokens.length - 1] ?? '';
+    const mapped = AUTOCOMPLETE_MAP[meaningful];
     if (mapped !== undefined) {
       candidates.push({
         path: mapped,

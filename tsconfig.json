@@ -6,6 +6,10 @@
   "compilerOptions": {
     "strict": true,
 
+    // React 17+ automatic runtime: no `import React` needed in every .tsx, and
+    // the transform matches what Vite/esbuild actually emits at build time.
+    "jsx": "react-jsx",
+
     // Beyond `strict`: these catch the classes of bug that hurt most in a
     // codebase whose whole value proposition is "never confidently wrong".
     "noUncheckedIndexedAccess": true,     // arr[i] is T | undefined - forces us to handle missing fields
@@ -16,7 +20,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true,
 
     "paths": {
       "@/*": ["./src/*"],

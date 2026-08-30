@@ -31,6 +31,8 @@ import {
   type ApplicantProfile,
   type ProfileValue,
 } from './schema';
+import { isProfilePath } from './paths';
+import { getValueAtPath } from './selectors';
 
 const log = createLogger('profile:repository');
 
@@ -163,11 +165,6 @@ export class StoredProfileRepository implements ProfileRepository {
   async mergeCandidates(candidates: ProfileCandidates): Promise<Result<MergeReport, AppError>> {
     const loaded = await this.loadOrCreate();
     if (!loaded.ok) return err(loaded.error);
-
-    // Imported lazily to keep this module's dependency direction clean: the
-    // repository knows about paths, but paths must not know about storage.
-    const { getValueAtPath } = await import('./selectors');
-    const { isProfilePath } = await import('./paths');
 
     const report: MergeReport = {
       applied: [],
