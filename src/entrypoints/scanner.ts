@@ -209,7 +209,12 @@ export default defineUnlistedScript(() => {
        * fair price for a transport that actually works.
        */
       if (resume !== undefined) {
-        setPendingResume(base64ToFile(resume.base64, resume.name, resume.type));
+        const file = decodeResume(resume);
+        // A resume that fails validation is not an error worth aborting the
+        // whole fill for - the text fields still get filled, and the file
+        // input reports `rejected`, which the panel already explains.
+        if (file !== null) setPendingResume(file);
+        else log.warn('Ignored a resume payload that failed validation');
       }
 
       try {
@@ -225,12 +230,82 @@ export default defineUnlistedScript(() => {
       }
     }
 
-    /** Decode a base64 payload back into a File the adapter can attach. */
-    function base64ToFile(base64: string, name: string, type: string): File {
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return new File([bytes], name, { type });
+    /**
+     * Largest resume this context will decode, in base64 characters.
+     *
+     * The document store already refuses anything over 10 MB, so this is not
+     * the primary control - it is the check on the side of the boundary that
+     * cannot see the store. Base64 inflates by 4/3, so 14 MB of characters
+     * covers a 10 MB file with room to spare, and anything larger is rejected
+     * BEFORE `atob` allocates a string of that size in the host page's heap.
+     */
+    const MAX_RESUME_BASE64_CHARS = 14 * 1024 * 1024;
+
+    /** The only file type the store accepts, restated at the boundary. */
+    const ALLOWED_RESUME_TYPES = new Set(['application/pdf']);
+
+    /**
+     * Decode a resume payload into a File, or null if it is not one.
+     *
+     * SECURITY: this runs in the page's context, on a payload that arrived
+     * over a message channel. Validating rather than trusting costs three
+     * comparisons and removes: an unbounded `atob` allocation (a hostile
+     * payload could make the host page allocate hundreds of megabytes), a
+     * file type the form was never meant to receive, and a filename carrying
+     * path separators or control characters into a page's upload widget.
+     */
+    function decodeResume(resume: ResumePayload): File | null {
+      if (typeof resume.base64 !== 'string' || resume.base64.length === 0) return null;
+      if (resume.base64.length > MAX_RESUME_BASE64_CHARS) return null;
+      if (!ALLOWED_RESUME_TYPES.has(resume.type)) return null;
+
+      const name = safeFileName(resume.name);
+      if (name === null) return null;
+
+      try {
+        const binary = atob(resume.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+        // Magic bytes. A file whose type says PDF but whose content is not one
+        // is either a bug on our side or something we should not be attaching
+        // to an employer's form. `%PDF-` is the first five bytes of every PDF.
+        if (
+          bytes.length < 5 ||
+          bytes[0] !== 0x25 || // %
+          bytes[1] !== 0x50 || // P
+          bytes[2] !== 0x44 || // D
+          bytes[3] !== 0x46 || // F
+          bytes[4] !== 0x2d // -
+        ) {
+          return null;
+        }
+
+        return new File([bytes], name, { type: resume.type });
+      } catch {
+        // atob throws on malformed base64. Losing the attachment is the right
+        // outcome; throwing into the host page is not.
+        return null;
+      }
+    }
+
+    /**
+     * Reduce a filename to something safe to hand a webpage.
+     *
+     * Strips directory separators and control characters, caps the length, and
+     * requires a .pdf extension. Returns null when nothing usable is left.
+     */
+    function safeFileName(raw: string): string | null {
+      if (typeof raw !== 'string') return null;
+      const cleaned = raw
+        // eslint-disable-next-line no-control-regex -- stripping control chars is the point
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .replace(/[\\/]/g, '_')
+        .trim()
+        .slice(0, 128);
+
+      if (cleaned.length === 0) return null;
+      return cleaned.toLowerCase().endsWith('.pdf') ? cleaned : `${cleaned}.pdf`;
     }
 
     async function runFills(actions: readonly ResolvedFieldAction[]): Promise<FieldFillReport[]> {
@@ -351,15 +426,157 @@ export default defineUnlistedScript(() => {
       return observer;
     }
 
+    /**
+     * SECURITY: validate a message from the panel instead of casting it.
+     *
+     * The three `CONTENT_*` requests used to be read with duck-typed casts
+     * (`message as { type?: string; actions?: ... }`), which is a compile-time
+     * fiction: at runtime `request.actions` could be anything, and it is
+     * handed straight to the fill executor, which resolves DOM elements and
+     * writes values into them. This narrows the payload once, here, and every
+     * branch below works on a shape that has actually been checked.
+     *
+     * Deliberately hand-rolled rather than Zod: the content script is the
+     * bundle that gets injected into every scanned page, and pulling a schema
+     * library into it would add ~12 KB to a script whose whole design goal is
+     * to be cheap to inject. The shapes are small enough that a few `typeof`
+     * checks are clearer than a schema anyway.
+     *
+     * Cost is O(actions), one pass, with the array itself capped.
+     */
+    function validateContentRequest(
+      message: unknown,
+    ):
+      | { type: 'CONTENT_SCAN' }
+      | { type: 'CONTENT_FILL'; actions: ResolvedFieldAction[]; resume?: ResumePayload }
+      | {
+          type: 'CONTENT_CORRECT';
+          localId: string;
+          profilePath: string | null;
+          scope: MappingScope;
+        }
+      | null {
+      if (typeof message !== 'object' || message === null) return null;
+      const raw = message as Record<string, unknown>;
+
+      if (raw['type'] === 'CONTENT_SCAN') return { type: 'CONTENT_SCAN' };
+
+      if (raw['type'] === 'CONTENT_CORRECT') {
+        const localId = raw['localId'];
+        if (typeof localId !== 'string' || localId.length === 0 || localId.length > 128) {
+          return null;
+        }
+        const path = raw['profilePath'];
+        const profilePath = typeof path === 'string' && path.length <= 128 ? path : null;
+
+        const scope = raw['scope'];
+        return {
+          type: 'CONTENT_CORRECT',
+          localId,
+          profilePath,
+          scope: isMappingScope(scope) ? scope : 'global',
+        };
+      }
+
+      if (raw['type'] === 'CONTENT_FILL') {
+        const actions = raw['actions'];
+        if (!Array.isArray(actions)) return null;
+        // Matches the scan cap: more actions than the page could have produced
+        // is not a legitimate request.
+        if (actions.length > MAX_ACTIONS_PER_FILL) return null;
+
+        const valid = actions.filter(isFillAction);
+        const resume = validateResumePayload(raw['resume']);
+
+        return resume === undefined
+          ? { type: 'CONTENT_FILL', actions: valid }
+          : { type: 'CONTENT_FILL', actions: valid, resume };
+      }
+
+      return null;
+    }
+
+    /** Upper bound on actions in one fill, matching the scanner's field cap. */
+    const MAX_ACTIONS_PER_FILL = 500;
+
+    const MAPPING_SCOPES = ['global', 'ats', 'company', 'exact_field'] as const;
+    type MappingScope = (typeof MAPPING_SCOPES)[number];
+
+    function isMappingScope(value: unknown): value is MappingScope {
+      return typeof value === 'string' && (MAPPING_SCOPES as readonly string[]).includes(value);
+    }
+
+    /**
+     * The minimum an action must be for the executor to act on it safely.
+     *
+     * Only `fill` and `attach_resume` are actionable, and the executor already
+     * refuses the rest - but an entry that is not even an object would throw
+     * inside the loop, and one bad entry must not cost the other nineteen.
+     */
+    function isFillAction(value: unknown): value is ResolvedFieldAction {
+      if (typeof value !== 'object' || value === null) return false;
+      const action = value as Record<string, unknown>;
+
+      if (typeof action['localId'] !== 'string' || action['localId'].length > 128) return false;
+      if (typeof action['action'] !== 'string') return false;
+
+      const kind = action['action'];
+      if (kind !== 'fill' && kind !== 'suggest' && kind !== 'skip' && kind !== 'attach_resume') {
+        return false;
+      }
+
+      const filled = action['value'];
+      if (filled !== undefined && typeof filled !== 'string' && typeof filled !== 'boolean') {
+        return false;
+      }
+
+      const option = action['optionValue'];
+      if (option !== undefined && typeof option !== 'string') return false;
+
+      return true;
+    }
+
+    /** Shape-check a resume payload before anything tries to decode it. */
+    function validateResumePayload(value: unknown): ResumePayload | undefined {
+      if (typeof value !== 'object' || value === null) return undefined;
+      const payload = value as Record<string, unknown>;
+
+      if (
+        typeof payload['name'] !== 'string' ||
+        typeof payload['type'] !== 'string' ||
+        typeof payload['base64'] !== 'string'
+      ) {
+        return undefined;
+      }
+
+      return {
+        name: payload['name'],
+        type: payload['type'],
+        base64: payload['base64'],
+      };
+    }
+
     // --- message handling from the side panel ------------------------------
     //
     // The side panel cannot reach the page directly, so it addresses this
     // script through the worker. Everything here is request/response; the page
     // never initiates a fill.
-    chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-      const request = message as { type?: string; actions?: ResolvedFieldAction[] } | null;
+    chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+      /**
+       * SECURITY: sender check.
+       *
+       * This listener lives inside a page we do not control. Chrome does not
+       * deliver a web page's `postMessage` here, and a different extension
+       * cannot address our content script - but this is the boundary that
+       * hands the applicant's resume to a DOM, so it is checked rather than
+       * assumed. `sender.id` is set by the browser, not by the sender.
+       */
+      if (sender.id !== chrome.runtime.id) return false;
 
-      if (request?.type === 'CONTENT_SCAN') {
+      const request = validateContentRequest(message);
+      if (request === null) return false;
+
+      if (request.type === 'CONTENT_SCAN') {
         scanAndResolve()
           .then((outcome) => {
             // A worker-side failure is reported AS a failure, with its code
@@ -394,19 +611,8 @@ export default defineUnlistedScript(() => {
         return true;
       }
 
-      if (request?.type === 'CONTENT_CORRECT') {
-        const correction = message as {
-          localId?: string;
-          profilePath?: string | null;
-          scope?: 'global' | 'ats' | 'company' | 'exact_field';
-        };
-        if (typeof correction.localId !== 'string') return false;
-
-        recordCorrection(
-          correction.localId,
-          correction.profilePath ?? null,
-          correction.scope ?? 'global',
-        )
+      if (request.type === 'CONTENT_CORRECT') {
+        recordCorrection(request.localId, request.profilePath, request.scope)
           .then((ok) => sendResponse({ ok }))
           .catch((error: unknown) => {
             log.error('Could not record correction', error);
@@ -415,10 +621,8 @@ export default defineUnlistedScript(() => {
         return true;
       }
 
-      if (request?.type === 'CONTENT_FILL' && Array.isArray(request.actions)) {
-        const payload = message as { resume?: ResumePayload };
-
-        fillSafeFields(request.actions, payload.resume)
+      if (request.type === 'CONTENT_FILL') {
+        fillSafeFields(request.actions, request.resume)
           .then((outcomes) => {
             // The per-field truth crosses back. `{ ok: true }` used to be the
             // whole reply, which is how the panel came to say "Filled" for a
