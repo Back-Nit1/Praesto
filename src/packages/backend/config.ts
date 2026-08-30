@@ -51,6 +51,24 @@ function buildEnv(): BuildEnv {
 }
 
 /**
+ * Test seam.
+ *
+ * NOT a runtime configuration hook, and the naming is deliberate so that no
+ * call site can pretend otherwise. Nothing in the extension reads it: it is set
+ * only by unit tests, which cannot otherwise reach a build-time variable. The
+ * same pattern as `__setRuntimeBudgetForTesting`.
+ *
+ * Even if something did call it, the manifest's `connect-src` still pins the
+ * one origin the browser will permit - which is precisely why that control
+ * exists in the manifest rather than only in this file.
+ */
+let testOverride: string | undefined;
+
+export function __setBackendOriginForTesting(origin?: string): void {
+  testOverride = origin;
+}
+
+/**
  * Patterns that must never appear in a build variable.
  *
  * The build already fails if a credential reaches `dist/`
@@ -129,7 +147,7 @@ export function validateBackendOrigin(raw: string): Result<string, AppError> {
  * fallback is exactly how data ends up somewhere nobody chose.
  */
 export function resolveBackendOrigin(): Result<string, AppError> {
-  const configured = buildEnv().WXT_BACKEND_ORIGIN;
+  const configured = testOverride ?? buildEnv().WXT_BACKEND_ORIGIN;
 
   if (configured === undefined || configured.trim().length === 0) {
     return err(
