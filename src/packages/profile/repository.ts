@@ -166,65 +166,9 @@ export class StoredProfileRepository implements ProfileRepository {
     const loaded = await this.loadOrCreate();
     if (!loaded.ok) return err(loaded.error);
 
-    const report: MergeReport = {
-      applied: [],
-      skippedVerified: [],
-      skippedUnknownPath: [],
-      conflicts: [],
-    };
+    const { profile, report } = mergeCandidatesInto(loaded.value, candidates);
 
-    // Mutate a structured clone so a mid-merge failure cannot leave the caller
-    // holding a half-updated profile object.
-    const next = structuredClone(loaded.value);
-
-    for (const [path, incoming] of Object.entries(candidates)) {
-      if (!isProfilePath(path)) {
-        report.skippedUnknownPath.push(path);
-        continue;
-      }
-
-      const lookup = getValueAtPath(next, path);
-      if (lookup.status !== 'ok') {
-        // A well-formed path into a collection entry that does not exist yet.
-        // Creating entries is the caller's job (it knows how many schools the
-        // resume listed); inventing one here would be guessing at structure.
-        report.skippedUnknownPath.push(path);
-        continue;
-      }
-
-      const existing = lookup.value;
-
-      if (isVerified(existing)) {
-        report.skippedVerified.push(path);
-        continue;
-      }
-
-      if (existing.value === null) {
-        writeValueInPlace(next, path, incoming);
-        report.applied.push(path);
-        continue;
-      }
-
-      // Both present, neither verified. Same value is a no-op; different values
-      // need the user.
-      const same = JSON.stringify(existing.value) === JSON.stringify(incoming.value);
-      if (same) {
-        // Merge the evidence so repeated extractions strengthen the record
-        // without duplicating the value itself.
-        writeValueInPlace(next, path, {
-          ...existing,
-          evidence: [...existing.evidence, ...incoming.evidence],
-        });
-        report.applied.push(path);
-      } else {
-        const conflict: MergeReport['conflicts'][number] = { path };
-        if (existing.raw !== undefined) conflict.existingRaw = existing.raw;
-        if (incoming.raw !== undefined) conflict.incomingRaw = incoming.raw;
-        report.conflicts.push(conflict);
-      }
-    }
-
-    const saved = await this.save(next);
+    const saved = await this.save(profile);
     if (!saved.ok) return err(saved.error);
 
     log.info(
@@ -273,6 +217,85 @@ export class StoredProfileRepository implements ProfileRepository {
     const removed = await this.store.remove(STORAGE_KEYS.activeProfile);
     return removed.ok ? ok(undefined) : err(removed.error);
   }
+}
+
+/**
+ * Merge candidates into a profile, purely.
+ *
+ * Extracted from `mergeCandidates` so a caller can compose it with OTHER
+ * changes and save the result ONCE. The resume import needs exactly that: it
+ * appends the education, employment and project entries a resume produced AND
+ * merges the scalar candidates, and doing those as two saves meant a failure
+ * between them left half an import applied - entries added, values missing,
+ * with nothing to tell the user which half they had.
+ *
+ * Pure in the way that matters: it clones its input and returns a new profile,
+ * so a caller holding the original still holds an unmodified one if anything
+ * downstream fails.
+ */
+export function mergeCandidatesInto(
+  profile: ApplicantProfile,
+  candidates: ProfileCandidates,
+): { profile: ApplicantProfile; report: MergeReport } {
+  const report: MergeReport = {
+    applied: [],
+    skippedVerified: [],
+    skippedUnknownPath: [],
+    conflicts: [],
+  };
+
+  // Mutate a structured clone so a mid-merge failure cannot leave the caller
+  // holding a half-updated profile object.
+  const next = structuredClone(profile);
+
+  for (const [path, incoming] of Object.entries(candidates)) {
+    if (!isProfilePath(path)) {
+      report.skippedUnknownPath.push(path);
+      continue;
+    }
+
+    const lookup = getValueAtPath(next, path);
+    if (lookup.status !== 'ok') {
+      // A well-formed path into a collection entry that does not exist yet.
+      // Creating entries is the caller's job (it knows how many schools the
+      // resume listed); inventing one here would be guessing at structure.
+      report.skippedUnknownPath.push(path);
+      continue;
+    }
+
+    const existing = lookup.value;
+
+    if (isVerified(existing)) {
+      report.skippedVerified.push(path);
+      continue;
+    }
+
+    if (existing.value === null) {
+      writeValueInPlace(next, path, incoming);
+      report.applied.push(path);
+      continue;
+    }
+
+    // Both present, neither verified. Same value is a no-op; different values
+    // need the user.
+    const same = JSON.stringify(existing.value) === JSON.stringify(incoming.value);
+    if (same) {
+      // Merge the evidence so repeated extractions strengthen the record
+      // without duplicating the value itself.
+      writeValueInPlace(next, path, {
+        ...existing,
+        evidence: [...existing.evidence, ...incoming.evidence],
+      });
+      report.applied.push(path);
+    } else {
+      const conflict: MergeReport['conflicts'][number] = { path };
+      if (existing.raw !== undefined) conflict.existingRaw = existing.raw;
+      if (incoming.raw !== undefined) conflict.incomingRaw = incoming.raw;
+      report.conflicts.push(conflict);
+    }
+  }
+
+  return { profile: next, report };
 }
 
 /**

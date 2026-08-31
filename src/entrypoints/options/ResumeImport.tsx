@@ -28,9 +28,13 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Button, StateBadge, StatusLine } from '@/components/ui';
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { ResumeDocumentStore, type ResumeDocumentSummary } from '@storage/documents';
-import { StoredProfileRepository } from '@profile/repository';
+import {
+  StoredProfileRepository,
+  mergeCandidatesInto,
+  type MergeReport,
+} from '@profile/repository';
 import { labelForPath } from '@profile/paths';
-import { bestConfidence, type ProfileValue } from '@profile/schema';
+import { bestConfidence, type ApplicantProfile, type ProfileValue } from '@profile/schema';
 import { parseResume, type ResumeParseResult } from '@resume-parser/index';
 import { createLogger } from '@shared/logging';
 
@@ -43,7 +47,22 @@ const profiles = new StoredProfileRepository(new ChromeLocalStore());
 const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
 const store = new ChromeLocalStore();
 
-export function ResumeImport(): ReactNode {
+/**
+ * @param editsPending  true when the Profile tab holds unsaved edits. Importing
+ *                      while that is true is a data-loss trap: the editor keeps
+ *                      an in-memory copy loaded BEFORE the import, and its next
+ *                      Save writes that stale copy straight over everything the
+ *                      import just added.
+ * @param onImported    tells the options page to reload from storage, so the
+ *                      editor's copy is the one the import produced.
+ */
+export function ResumeImport({
+  editsPending = false,
+  onImported,
+}: {
+  editsPending?: boolean;
+  onImported?: () => void | Promise<void>;
+} = {}): ReactNode {
   const [stored, setStored] = useState<ResumeDocumentSummary[]>([]);
   const [defaultId, setDefaultId] = useState<string | undefined>(undefined);
   const [parsed, setParsed] = useState<ResumeParseResult | undefined>(undefined);
@@ -134,7 +153,18 @@ export function ResumeImport(): ReactNode {
     setBusy(false);
   }
 
-  /** Merge the checked values into the profile. */
+  /**
+   * Merge the checked values into the profile - in ONE save.
+   *
+   * This used to be two writes: append the education, employment and project
+   * entries, then merge the scalar candidates. A failure between them (a
+   * quota error, a schema rejection, the page closing) left half an import
+   * applied - entries added, values missing - with nothing to tell the user
+   * which half they had, and no way to retry without duplicating the entries.
+   *
+   * `update` loads, applies both changes to the same object, validates and
+   * saves once, so the import either happened or it did not.
+   */
   async function handleAccept(): Promise<void> {
     if (parsed === undefined) return;
     setBusy(true);
@@ -144,32 +174,45 @@ export function ResumeImport(): ReactNode {
       if (accepted.has(path)) candidates[path] = value;
     }
 
-    // Repeated entities are appended wholesale. They have no existing slot to
-    // conflict with, and `mergeCandidates` only handles paths into slots that
-    // already exist - see its `out_of_range` case.
-    const appended = await profiles.update((profile) => ({
-      ...profile,
-      education: [...profile.education, ...parsed.education],
-      employment: [...profile.employment, ...parsed.employment],
-      projects: [...profile.projects, ...parsed.projects],
-    }));
+    // Captured from inside the mutation because `update` returns the profile,
+    // not the merge report - and the report is what the user is shown. The
+    // mutation runs exactly once per call, synchronously, before `update`
+    // resolves, so there is no window in which this is read stale.
+    let report: MergeReport | undefined;
 
-    if (!appended.ok) {
-      setStatus({ kind: 'error', message: appended.error.message });
-      setBusy(false);
-      return;
-    }
+    const saved = await profiles.update((profile) => {
+      // Repeated entities are appended wholesale. They have no existing slot
+      // to conflict with, and the merge only handles paths into slots that
+      // already exist - see its `out_of_range` case.
+      const withEntries: ApplicantProfile = {
+        ...profile,
+        education: [...profile.education, ...parsed.education],
+        employment: [...profile.employment, ...parsed.employment],
+        projects: [...profile.projects, ...parsed.projects],
+      };
 
-    const merged = await profiles.mergeCandidates(candidates);
+      const merged = mergeCandidatesInto(withEntries, candidates);
+      report = merged.report;
+      return merged.profile;
+    });
+
     setBusy(false);
 
-    if (!merged.ok) {
-      setStatus({ kind: 'error', message: merged.error.message });
+    if (!saved.ok) {
+      setStatus({ kind: 'error', message: saved.error.message });
       return;
     }
 
-    const { applied, skippedVerified, conflicts } = merged.value;
+    const { applied, skippedVerified, conflicts } = report ?? {
+      applied: [],
+      skippedVerified: [],
+      conflicts: [],
+    };
     setParsed(undefined);
+
+    // The Profile tab is holding a copy loaded before this import. Tell it to
+    // reload, or its next Save overwrites everything just merged.
+    await onImported?.();
 
     // Report what actually happened, including what was declined and why. A
     // bare "imported!" would hide that some values were left out.
@@ -217,14 +260,41 @@ export function ResumeImport(): ReactNode {
             Upload a PDF once. It stays in this browser, helps build your profile, and is ready to attach when an application asks for it.
           </p>
 
-          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition hover:-translate-y-px hover:bg-[var(--app-accent-strong)]">
+          {/*
+            THE UNSAVED-EDITS GUARD.
+
+            The Profile tab keeps its edits in memory until Save. An import
+            writes to storage directly, so importing on top of unsaved edits
+            sets up a trap: the editor still holds the pre-import copy, and its
+            next Save writes that copy over everything the import added. The
+            user sees their resume import silently undone by an action that had
+            nothing to do with it.
+
+            Blocking is the honest resolution. Merging the two would mean
+            guessing which side of a disagreement to keep, which is the one
+            thing this product does not do.
+          */}
+          {editsPending && (
+            <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-[--app-text]">
+              You have unsaved changes on the Profile tab. Save or discard them first - importing
+              now would be undone the next time you save.
+            </p>
+          )}
+
+          <label
+            className={`inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition ${
+              editsPending || busy
+                ? 'cursor-not-allowed opacity-50'
+                : 'cursor-pointer hover:-translate-y-px hover:bg-[var(--app-accent-strong)]'
+            }`}
+          >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" /></svg>
           {busy ? 'Reading your resume…' : 'Upload PDF resume'}
           <input
             type="file"
             accept="application/pdf,.pdf"
             className="hidden"
-            disabled={busy}
+            disabled={busy || editsPending}
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file !== undefined) void handleUpload(file);

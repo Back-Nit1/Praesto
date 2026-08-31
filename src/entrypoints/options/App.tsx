@@ -52,7 +52,8 @@ const TAB_META: Record<Tab, { kicker: string; title: string; description: string
 };
 
 export function App(): ReactNode {
-  const { profile, loading, error, edit, save, exportJson, importJson, dirty } = useProfile();
+  const { profile, loading, error, edit, save, reload, exportJson, importJson, dirty } =
+    useProfile();
   const [tab, setTab] = useState<Tab>('profile');
   const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
     kind: 'idle',
@@ -240,7 +241,15 @@ export function App(): ReactNode {
               {tab === 'profile' && profile !== undefined && (
                 <ProfileEditor profile={profile} edit={edit} />
               )}
-              {tab === 'resume' && <ResumeImport />}
+              {/*
+        ONE PROFILE STATE, NOT TWO.
+
+        `useProfile` holds the copy the editor is working on; the resume import
+        writes to storage. Handing it `dirty` lets it refuse to import over
+        unsaved edits, and `reload` makes the editor pick up what the import
+        wrote - without which the editor's next Save would overwrite it.
+      */}
+      {tab === 'resume' && <ResumeImport editsPending={dirty} onImported={reload} />}
               {tab === 'learned' && <LearnedRules />}
               {tab === 'playground' && <MappingPlayground profile={profile} />}
             </div>
