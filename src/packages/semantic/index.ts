@@ -30,6 +30,7 @@ export {
   type SemanticApplyInput,
   type SemanticApplyOutcome,
   type SemanticFieldUpdate,
+  type SemanticFailureKind,
   type SemanticRunSummary,
 } from './apply';
 export { resolveConcepts, type ConceptStageInput, type ConceptStageOutcome } from './concept';

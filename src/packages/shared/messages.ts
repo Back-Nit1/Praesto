@@ -329,9 +329,16 @@ export const semanticRunSummarySchema = z.object({
   modelCalls: z.number().int().nonnegative(),
   error: z
     .object({
-      code: z.string().max(64),
-      message: z.string().max(200),
-      /** Present on RATE_LIMITED. The actionable part of that failure. */
+      /**
+       * A CLOSED vocabulary, not the underlying `AppErrorCode`.
+       *
+       * The panel needs exactly three distinct sentences, and the raw code
+       * never crosses this boundary - so there is no path by which
+       * "BACKEND_REJECTED" reaches a user, and adding a kind without giving it
+       * a sentence is a compile error (see `SEMANTIC_FAILURE_TEXT`).
+       */
+      kind: z.enum(['rate_limited', 'offline', 'unavailable']),
+      /** Present on `rate_limited`. The actionable part of that failure. */
       retryAfterMs: z.number().nonnegative().optional(),
     })
     .optional(),
@@ -343,6 +350,8 @@ export const semanticRunSummarySchema = z.object({
     })
     .optional(),
 });
+
+export type SemanticRunSummary = z.infer<typeof semanticRunSummarySchema>;
 
 export const resolveApplicationFieldsResponseSchema = z.object({
   ok: z.literal(true),

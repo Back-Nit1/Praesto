@@ -20,7 +20,7 @@
  * here carries enough information for the panel to be honest.
  */
 import type { FillFailureReason } from '@fill-engine/types';
-import type { ResolvedFieldAction } from './messages';
+import type { ResolvedFieldAction, SemanticRunSummary } from './messages';
 
 /**
  * A resume, encoded for transport into the page context.
@@ -107,6 +107,20 @@ export interface ContentScanResponse {
    * is how a missing profile came to be reported as a missing form.
    */
   fieldsDetected: number;
+  /**
+   * What the semantic fallback cost on this scan, and whether it failed.
+   *
+   * ABSENT WHENEVER IT DID NOT RUN, which is every form the deterministic
+   * pipeline understood - so its absence means "there was nothing here it could
+   * have helped with", not "it failed quietly".
+   *
+   * Passed through to the panel for ONE reason: a user whose fields silently
+   * stop improving cannot tell "we are out of AI answers until tomorrow" from
+   * "this form just did not match", and only the first is something they can
+   * act on. It carries no field ids, labels or values - see
+   * `semanticRunSummarySchema`.
+   */
+  semantic?: SemanticRunSummary;
 }
 
 /** What one field's fill attempt actually did. Mirrors FieldFillOutcome. */
@@ -148,4 +162,44 @@ export const FILL_FAILURE_TEXT: Readonly<Record<FillFailureReason, string>> = {
 export function describeFillFailure(reason: string | undefined): string {
   if (reason === undefined) return 'It was not filled';
   return FILL_FAILURE_TEXT[reason as FillFailureReason] ?? 'It could not be filled';
+}
+
+/**
+ * What to say when the AI fallback could not run.
+ *
+ * Same rule as `FILL_FAILURE_TEXT`, for the same reason: two of this project's
+ * worst bugs were honest code with dishonest messages, both because one
+ * sentence was shown for several different causes. So each kind gets its own,
+ * and a new kind without a sentence is a compile error.
+ *
+ * Every sentence ends by saying what STILL WORKS. The deterministic engine is
+ * unaffected by any of these, and a user who reads "AI unavailable" and
+ * concludes the extension is broken has been misinformed by omission.
+ */
+export const SEMANTIC_FAILURE_TEXT: Readonly<
+  Record<NonNullable<SemanticRunSummary['error']>['kind'], string>
+> = {
+  rate_limited: "You have used today's AI answers. Recognised fields are still filled.",
+  offline: 'You appear to be offline, so AI help was skipped. Recognised fields are still filled.',
+  unavailable: 'AI help is unavailable right now. Recognised fields are still filled.',
+};
+
+/**
+ * "in about 2 hours", from a millisecond count.
+ *
+ * Rounded, and deliberately vague past an hour: the exact reset instant is not
+ * something a person acts on, and stating it precisely invites them to believe
+ * a number our client-side counter cannot actually promise - the enforceable
+ * limit is the backend's.
+ */
+export function describeQuotaReset(retryAfterMs: number | undefined): string | undefined {
+  if (retryAfterMs === undefined || retryAfterMs <= 0) return undefined;
+
+  const minutes = Math.round(retryAfterMs / 60_000);
+  if (minutes < 1) return 'in under a minute';
+  if (minutes < 60) return `in about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `in about ${hours} hour${hours === 1 ? '' : 's'}`;
+  return 'tomorrow';
 }

@@ -293,12 +293,23 @@ async function matchAgainstOptions(
  * "did this cost anything, did it fail, and how much is left", and nothing about
  * what the applicant was asked or what they would have answered.
  */
+/**
+ * Why the fallback could not run, in the only three flavours a user needs.
+ *
+ * DELIBERATELY NARROWER THAN `AppErrorCode`. A misconfigured origin, an
+ * unregistered install and a malformed reply are three different bugs for us
+ * and exactly one situation for the applicant: the AI part is not working, the
+ * rest still is. Collapsing them here means the raw code never crosses the
+ * message boundary, so there is no path by which "BACKEND_REJECTED" reaches
+ * somebody's screen mid-application.
+ */
+export type SemanticFailureKind = 'rate_limited' | 'offline' | 'unavailable';
+
 export interface SemanticRunSummary {
   readonly modelCalls: number;
   readonly error?: {
-    readonly code: string;
-    readonly message: string;
-    /** Present on RATE_LIMITED. The actionable part of that failure. */
+    readonly kind: SemanticFailureKind;
+    /** Present on `rate_limited`. The actionable part of that failure. */
     readonly retryAfterMs?: number;
   };
   /** Present when the caller could read the gateway's daily counter. */
@@ -312,15 +323,15 @@ export interface SemanticRunSummary {
 /**
  * Reduce a run to what may be reported.
  *
- * WHY THIS COPIES TWO KEYS RATHER THAN SPREADING `error.context`.
- * An `AppError`'s context is a diagnostic bag typed as unknown-valued, and
- * elsewhere in this codebase it legitimately carries a field label or a filled
- * value. Spreading it here would move the applicant's own words across the
- * message boundary and into a log line, which is precisely the leak the
- * descriptor seam exists to prevent. So the safe keys are named, one at a time,
- * and everything else is dropped.
+ * WHAT IT DELIBERATELY DROPS.
+ * The `AppError` itself, its message, and its `context` bag. That bag is typed
+ * as unknown-valued and elsewhere in this codebase legitimately carries a field
+ * label or a filled value - so spreading it would push the applicant's own
+ * words across the message boundary and into a log line, which is precisely the
+ * leak the descriptor seam exists to prevent. One key is read out of it by
+ * name, and only for the one code where it means something.
  *
- * `RATE_LIMITED` is singled out because it is the one failure the user can act
+ * `rate_limited` is singled out because it is the one failure the user can act
  * on: "you are out of AI answers until tomorrow" is a different sentence from
  * "nothing matched", and without `retryAfterMs` they are the same event.
  */
@@ -330,18 +341,18 @@ export function summariseRun(
 ): SemanticRunSummary {
   const error = outcome.error;
   const retryAfterMs = error?.context['retryAfterMs'];
+  const kind = error === undefined ? undefined : classify(error.code);
 
   // Built as one expression rather than by assignment: `exactOptionalPropertyTypes`
   // treats an explicitly-undefined key as a different thing from an absent one,
   // and so does structured clone across the message boundary.
   return {
     modelCalls: outcome.modelCalls,
-    ...(error !== undefined
+    ...(kind !== undefined
       ? {
           error: {
-            code: error.code,
-            message: error.message,
-            ...(error.code === 'RATE_LIMITED' && typeof retryAfterMs === 'number'
+            kind,
+            ...(kind === 'rate_limited' && typeof retryAfterMs === 'number'
               ? { retryAfterMs }
               : {}),
           },
@@ -349,4 +360,23 @@ export function summariseRun(
       : {}),
     ...(usage !== undefined ? { quota: usage } : {}),
   };
+}
+
+/**
+ * Map an `AppErrorCode` onto the three situations a user can distinguish.
+ *
+ * The default is `unavailable` rather than a throw or a passthrough: a code
+ * this function has not heard of is still, from where the applicant sits, "the
+ * AI part is not working" - and inventing a fourth sentence for it would be
+ * guessing at a cause we do not know.
+ */
+function classify(code: string): SemanticFailureKind {
+  switch (code) {
+    case 'RATE_LIMITED':
+      return 'rate_limited';
+    case 'BACKEND_UNREACHABLE':
+      return 'offline';
+    default:
+      return 'unavailable';
+  }
 }

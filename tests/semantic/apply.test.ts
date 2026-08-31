@@ -291,11 +291,7 @@ describe('summariseRun - what the panel is told', () => {
 
     expect(summary).toEqual({
       modelCalls: 1,
-      error: {
-        code: 'RATE_LIMITED',
-        message: "That is today's limit for AI answers",
-        retryAfterMs: 3_600_000,
-      },
+      error: { kind: 'rate_limited', retryAfterMs: 3_600_000 },
     });
   });
 
@@ -308,17 +304,44 @@ describe('summariseRun - what the panel is told', () => {
     expect(summary.quota).toEqual({ used: 42, limit: 200, resetsInMs: 7_200_000 });
   });
 
-  it('omits retryAfterMs when the failure was not a rate limit', () => {
+  it('reports being offline as its own kind, distinct from a rate limit', () => {
     const summary = summariseRun({
       updates: [],
       modelCalls: 1,
       error: new AppError('BACKEND_UNREACHABLE', 'Could not reach the service'),
     });
 
-    expect(summary.error).toEqual({
-      code: 'BACKEND_UNREACHABLE',
-      message: 'Could not reach the service',
+    expect(summary.error).toEqual({ kind: 'offline' });
+  });
+
+  it('collapses every other failure into one situation the user can understand', () => {
+    // A misconfigured origin, an unregistered install and a malformed reply are
+    // three different bugs for us and exactly one situation for the applicant.
+    for (const code of [
+      'BACKEND_REJECTED',
+      'BACKEND_UNAUTHENTICATED',
+      'BACKEND_NOT_CONFIGURED',
+      'RESPONSE_TOO_LARGE',
+    ] as const) {
+      const summary = summariseRun({
+        updates: [],
+        modelCalls: 1,
+        error: new AppError(code, 'internal detail'),
+      });
+      expect(summary.error).toEqual({ kind: 'unavailable' });
+    }
+  });
+
+  it('never lets a raw error code or message reach the panel', () => {
+    const summary = summariseRun({
+      updates: [],
+      modelCalls: 1,
+      error: new AppError('BACKEND_REJECTED', 'The service sent an unexpected shape'),
     });
+
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain('BACKEND_REJECTED');
+    expect(serialized).not.toContain('unexpected shape');
   });
 
   it('never carries the applicant\'s own words into the summary', () => {
@@ -335,5 +358,7 @@ describe('summariseRun - what the panel is told', () => {
 
     expect(JSON.stringify(summary)).not.toContain('Elm Street');
     expect(JSON.stringify(summary)).not.toContain('home address');
+    // Not even the retryAfterMs, which is only meaningful on a rate limit.
+    expect(JSON.stringify(summary)).not.toContain('500');
   });
 });

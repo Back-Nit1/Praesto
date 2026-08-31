@@ -138,6 +138,11 @@ export default defineUnlistedScript(() => {
       error?: { code: string; message: string };
       /** Cross-origin iframes on this page - see `embeddedOrigins` below. */
       embeddedOrigins?: string[];
+      /**
+       * What the semantic fallback cost, when it ran. Passed straight through
+       * from the worker; this frame neither reads it nor acts on it.
+       */
+      semantic?: ContentScanResponse['semantic'];
     }
 
     /**
@@ -258,6 +263,7 @@ export default defineUnlistedScript(() => {
         actions: response.actions,
         fieldsDetected: scan.fields.length,
         ...(embedded.length > 0 ? { embeddedOrigins: embedded } : {}),
+        ...(response.semantic !== undefined ? { semantic: response.semantic } : {}),
       };
     }
 
@@ -670,6 +676,7 @@ export default defineUnlistedScript(() => {
               ...(outcome.embeddedOrigins !== undefined
                 ? { embeddedOrigins: outcome.embeddedOrigins }
                 : {}),
+              ...(outcome.semantic !== undefined ? { semantic: outcome.semantic } : {}),
             };
             sendResponse(success);
           })
