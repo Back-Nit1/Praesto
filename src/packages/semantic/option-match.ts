@@ -45,8 +45,10 @@
  *
  * NO NETWORK, NO STORAGE, NO CLOCK. Pure function, plain objects in and out.
  */
+import type { AppError } from '@shared/errors';
 import { normalizeCompact, normalizeLabel, tokenize } from '@form-engine/descriptor/normalize';
 import type { FieldOption } from '@form-engine/descriptor/types';
+import type { SemanticPort } from './port';
 
 /** Which tier settled a match. Recorded so a weak match is auditable. */
 export type MatchStrategy = 'exact' | 'exact_value' | 'compact' | 'token_set' | 'containment';
@@ -147,4 +149,91 @@ function sameTokenSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
     if (!b.has(token)) return false;
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 - escalating a match the scorer could not settle
+// ---------------------------------------------------------------------------
+//
+// Everything above is free. Everything below costs a call, and is therefore
+// reached only when the ladder produced a tie or nothing at all.
+//
+// THE SNAP-BACK IS THE WHOLE SAFETY PROPERTY OF THIS STAGE.
+// The reply is a string. It is matched against the REAL option list, in code,
+// and a string that is not an option is discarded. So the model cannot fill a
+// field with free text, cannot invent an option, and cannot select by index -
+// which would be the dangerous shape, because an off-by-one names a real,
+// valid, wrong answer that nothing downstream could detect.
+//
+// And what survives the snap-back is still only a resolved value. `decideFill`
+// runs afterwards, unchanged, so a sensitive path reached this way is gated
+// exactly as it would be by any other route.
+
+/** What stage 2 needs, and the port it may use. */
+export interface OptionStageInput {
+  readonly fieldId: string;
+  /** ONE already-resolved value. Not the profile. */
+  readonly value: string;
+  readonly options: readonly FieldOption[];
+  readonly port: SemanticPort;
+}
+
+export interface OptionStageOutcome {
+  /** An option from the input list, by reference, or null for "leave it". */
+  readonly option: FieldOption | null;
+  /** Which tier settled it. `'model'` when the scorer could not. */
+  readonly strategy: MatchStrategy | 'model' | null;
+  /** Calls actually made: 0 whenever the deterministic scorer was enough. */
+  readonly modelCalls: number;
+  /** Why the remote call failed, when it did. Surfaced, never swallowed. */
+  readonly error?: AppError;
+}
+
+/**
+ * Choose an option for one field: deterministically if possible, remotely if
+ * not, and not at all if neither can do it honestly. Never throws.
+ */
+export async function chooseOption(input: OptionStageInput): Promise<OptionStageOutcome> {
+  if (input.options.length === 0) return { option: null, strategy: null, modelCalls: 0 };
+
+  const local = matchOption(input.value, input.options);
+  if (local.kind === 'matched') {
+    return { option: local.option, strategy: local.strategy, modelCalls: 0 };
+  }
+
+  const reply = await input.port.chooseOption({
+    fieldId: input.fieldId,
+    value: input.value,
+    options: input.options.map((option) => option.label),
+  });
+
+  if (!reply.ok) {
+    // Today's behaviour: the field stays blank and the panel says so.
+    return { option: null, strategy: null, modelCalls: 1, error: reply.error };
+  }
+
+  const chosen = snapBack(reply.value.optionLabel, input.options);
+  return {
+    option: chosen,
+    strategy: chosen === null ? null : 'model',
+    modelCalls: 1,
+  };
+}
+
+/**
+ * Turn a returned string into one of OUR option objects, or nothing.
+ *
+ * Requires exactly one match, on the same normalization the rest of the engine
+ * uses. Two options sharing a normalized label is a real ATS shape, and picking
+ * either would be picking by array order.
+ */
+function snapBack(label: string | null, options: readonly FieldOption[]): FieldOption | null {
+  if (typeof label !== 'string' || label.trim().length === 0) return null;
+
+  const wanted = normalizeLabel(label);
+  if (wanted.length === 0) return null;
+
+  const matches = options.filter((option) => normalizeLabel(option.label) === wanted);
+  const only = matches[0];
+  return matches.length === 1 && only !== undefined ? only : null;
 }

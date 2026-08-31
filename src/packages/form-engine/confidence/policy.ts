@@ -105,6 +105,26 @@ export interface ConfidencePolicyConfig {
      */
     readonly collectionAliasWithSection: number;
     readonly fuzzy: number;
+    /**
+     * A concept proposed by the remote semantic fallback, or replayed from its
+     * cache. BELOW `autofillThreshold` BY CONSTRUCTION, and below `fuzzy` on
+     * purpose.
+     *
+     * Two claims are packed into that ordering. The first: a novel question
+     * must surface as a SUGGESTION the user reads, never as a silent fill -
+     * a model naming a concept is a plausible reading of a question we have
+     * never seen, which is exactly what the review step exists for. The
+     * second: it is worth no more than our own local token-overlap guess,
+     * because it is the same kind of thing - an inference about wording -
+     * made somewhere we cannot inspect, from text a webpage controls.
+     *
+     * A semantic mapping is promoted the way every other mapping is promoted:
+     * the user accepts it, the correction path records a `LearnedMapping`, and
+     * the NEXT encounter matches at `learnedMapping` scoring with the user's
+     * own authority behind it. There is deliberately no path by which this
+     * number rises on its own.
+     */
+    readonly semantic: number;
   };
 
   /**
@@ -160,6 +180,7 @@ export const DEFAULT_CONFIDENCE_POLICY: ConfidencePolicyConfig = {
     collectionAlias: 0.96, // "school" / "employer" - unambiguous about its block
     collectionAliasWithSection: 0.98, // ...and the section heading agrees
     fuzzy: 0.82, // token overlap only - BELOW autofillThreshold by design
+    semantic: 0.8, // a remote reading of a novel question - suggestion only, never a fill
   },
 
   multiSignalBonus: 0.015,
