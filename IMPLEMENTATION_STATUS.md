@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-08-31
-**Tests:** 641 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
+**Tests:** 665 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -203,7 +203,9 @@ model-derived mapping exactly as it applies to an alias match.
 - [x] Stage 2: one value + one option list, only when the scorer cannot decide
 - [x] Wire schemas, Zod-validated, page text carried as `untrusted`
 - [x] `connect-src` pinned to the compiled-in backend origin
+- [x] Wired into the scan pipeline, and the panel says when AI help ran out
 - [ ] **Run against a real Greenhouse, Lever or Ashby application**
+- [ ] **The two backend endpoints exist**
 
 **The order is the design**, and each step is cheaper than the next:
 
@@ -241,6 +243,26 @@ learned mapping carries the user's authority and scores at 0.96; a model's guess
 must not inherit that by being stored where the mapper reads. It would also
 compete for that store's 1000-rule cap and start evicting real user corrections.
 `semantic/cache.ts` records the full argument.
+
+**The pass is one function, not four calls at the call site.** It lived in
+`background.ts`, where nothing could test it, and the fixture test had its own
+copy of the same sequence — two implementations of an ordering is one more than
+the number that can be right, and the copy in the test would have gone on
+passing while the shipping one drifted. `applySemanticFallback` is now called by
+both.
+
+It returns **updates** rather than mutating the caller's actions, which is the
+central safety property in type form: the function has no way to express "leave
+that field worse than you found it". A failure of any kind is exactly today's
+behaviour, without needing a test per failure path.
+
+**A failure is reported, not swallowed.** A user whose fields quietly stop
+improving cannot tell "we are out of AI answers until tomorrow" from "this form
+just did not match", and only the first is something they can act on. The wire
+carries a closed vocabulary — `rate_limited` / `offline` / `unavailable` — never
+the `AppErrorCode`, so there is no path by which `BACKEND_REJECTED` reaches
+somebody's screen mid-application. `SEMANTIC_FAILURE_TEXT` sits next to the wire
+type, so adding a kind without a sentence is a compile error.
 
 **A null answer is cached like any other.** "No path fits this question" is the
 correct answer to "How did you hear about us?", and to most of the questions a
@@ -293,13 +315,13 @@ what it knows.
    tested in isolation — the join, retention, the repository, the stash — but
    the worker itself has no test harness in this repo, so the wiring between
    them is verified by hand. That is the largest untested seam in this feature.
-8. **The end-to-end tests run against our own fixtures.** They use a real
+10. **The end-to-end tests run against our own fixtures.** They use a real
    browser, the real build and the real message pipeline, so they catch a
    rejected manifest, an unregistered worker or a fill that never lands - but
    the pages are ours. An anonymised capture of a real Greenhouse, Lever, Ashby
    and Workday application is the next thing worth adding, and every real-world
    failure should become a saved fixture and a failing test before it is fixed.
-9. **The semantic fallback has never run against a real application, or a real
+11. **The semantic fallback has never run against a real application, or a real
    backend.** The fixtures in `fixtures/forms/*-semantic.html` are written from
    each ATS's published naming conventions, not captured from real forms, and
    every test runs against a fake port. So the subsystem is proven against the
@@ -307,7 +329,7 @@ what it knows.
    It is not proven against Greenhouse. The backend endpoints
    (`/v1/semantic/concepts`, `/v1/semantic/option`) do not exist yet.
 
-10. **The option scorer is deliberately weak in the middle.** It settles exact
+12. **The option scorer is deliberately weak in the middle.** It settles exact
    matches, case and punctuation differences, reordered labels
    ("Computer Engineering" / "Engineering, Computer") and guarded containment.
    It has NO general similarity tier, because any Jaccard or edit-distance
@@ -319,19 +341,25 @@ what it knows.
    against a range dropdown. On the 13-case corpus in
    `tests/semantic/option-match.test.ts`, 10 are settled locally.
 
-11. **Cache eviction is oldest-first, not least-recently-used.** LRU needs a
+13. **Cache eviction is oldest-first, not least-recently-used.** LRU needs a
    write on every read, and the cache is read on the hot path of every scan —
    which would turn the free cache hit into a storage write and defeat its
    purpose. At the 500-entry cap the difference is theoretical, but a user who
    met 500 novel questions would start paying again for their oldest ones.
 
-12. **A cached concept is never re-examined.** If a model's answer for a
+14. **Nothing renders the model-call count or the remaining quota on a
+   successful scan.** The panel is silent unless the fallback failed, which is
+   deliberate — a panel that narrates its own internals every scan is one the
+   user stops reading. But it means "how much of my daily budget did this form
+   cost" is currently unanswerable from the UI.
+
+15. **A cached concept is never re-examined.** If a model's answer for a
    question was wrong, the user corrects the field once and the existing
    learned-mapping path takes over at higher confidence — but the wrong cached
    concept stays until the cache is cleared. There is a `clear()`, and no UI
    calls it yet.
 
-13. **The end-to-end suite grants host permission statically.** `activeTab` is
+16. **The end-to-end suite grants host permission statically.** `activeTab` is
    granted by a click on the toolbar icon, which is browser chrome and cannot
    be automated, so the test copy of the build is given host access to the
    fixture server. The permission FLOW - a lapsed grant, a per-origin request -
@@ -388,17 +416,13 @@ After that, in order:
    `/v1/semantic/option` are specified by the schemas in `backend/schemas.ts`
    and do not exist. Until they do, the fallback degrades to today's behaviour
    on every field — which is correct, and is not the feature.
-2. **Surface remaining quota in the panel.** `gateway.usage()` exists and
-   `RATE_LIMITED` carries `retryAfterMs`; the panel does not yet say "you have
-   158 AI answers left today", so a user who runs out sees fields silently stop
-   improving.
-3. **Let the user see and clear the concept cache.** `SemanticConceptCache` has
+2. **Let the user see and clear the concept cache.** `SemanticConceptCache` has
    `clear()` and the settings screen does not call it, so a wrong cached
    concept currently has no escape short of clearing all extension data.
-4. **Incremental rescan of a revealed subtree**, so a conditional question
+3. **Incremental rescan of a revealed subtree**, so a conditional question
    appears in the panel without a full rescan. The signal is wired; only the
    incremental path is missing.
-5. **ATS-specific rules for Greenhouse, Lever and Workday**, added only where
+4. **ATS-specific rules for Greenhouse, Lever and Workday**, added only where
    the generic engine genuinely cannot reach (spec section 18).
 
 ---
@@ -465,7 +489,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 641 tests
+npm test           # 665 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```
