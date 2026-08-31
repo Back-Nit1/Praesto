@@ -32,7 +32,7 @@ import type { ATSKind } from '@ats/types';
 import type { MappingSource } from '@form-engine/mapper/types';
 import { AppError } from '@shared/errors';
 import { ok, type Result } from '@shared/result';
-import { ChromeLocalStore, type KeyValueStore } from '@storage/key-value-store';
+import { ChromeLocalStore, InMemoryStore, type KeyValueStore } from '@storage/key-value-store';
 import { STORAGE_KEYS } from '@storage/keys';
 
 /** What the worker knew about one field at the moment it decided. */
@@ -107,7 +107,7 @@ export class PendingRunStore {
    *              not get tested.
    */
   constructor(
-    private readonly store: KeyValueStore = new ChromeLocalStore(sessionArea()),
+    private readonly store: KeyValueStore = sessionStore(),
     private readonly clock: () => number = () => Date.now(),
   ) {}
 
@@ -184,6 +184,10 @@ export class PendingRunStore {
  * inside a service worker, where the throw would take the message listener down
  * with it and every subsequent message would fail silently.
  */
-function sessionArea(): chrome.storage.StorageArea {
-  return chrome.storage?.session ?? chrome.storage.local;
+function sessionStore(): KeyValueStore {
+  const area = globalThis.chrome?.storage?.session ?? globalThis.chrome?.storage?.local;
+  // An in-memory store rather than a throw. This runs at module load inside a
+  // service worker: a throw here would take the message listener down with it,
+  // and every subsequent message would fail for a reason no log would explain.
+  return area === undefined ? new InMemoryStore() : new ChromeLocalStore(area);
 }
