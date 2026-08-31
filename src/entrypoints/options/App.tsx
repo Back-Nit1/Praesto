@@ -14,12 +14,14 @@ import { ProfileEditor } from './ProfileEditor';
 import { MappingPlayground } from './MappingPlayground';
 import { LearnedRules } from './LearnedRules';
 import { ResumeImport } from './ResumeImport';
+import { History } from './History';
 
-type Tab = 'profile' | 'resume' | 'learned' | 'playground';
+type Tab = 'profile' | 'resume' | 'history' | 'learned' | 'playground';
 
 const TAB_LABELS: Record<Tab, string> = {
   profile: 'Profile',
   resume: 'Resume',
+  history: 'History',
   learned: 'Learned rules',
   playground: 'Mapping playground',
 };
@@ -43,6 +45,11 @@ const TAB_META: Record<Tab, { title: string; description: string }> = {
     title: 'Your resume',
     description:
       'The file that gets attached to applications, and the fastest way to fill in this profile. You review every value it reads before any of it is kept.',
+  },
+  history: {
+    title: 'Application history',
+    description:
+      'Every application you have filled, with what was filled, what failed and what the extension did not understand. The questions are recorded; your answers are not.',
   },
   learned: {
     title: 'Learned rules',
@@ -139,7 +146,9 @@ export function App(): ReactNode {
     return (
       <div className="options-shell grid min-h-screen place-items-center">
         <div className="text-center">
-          <div className="scan-orbit" aria-hidden="true" />
+          <div className="scan-lines" aria-hidden="true">
+            <span /><span /><span /><span />
+          </div>
           <p className="text-sm text-[var(--ink-2)]">Loading your profile…</p>
         </div>
       </div>
@@ -158,7 +167,7 @@ export function App(): ReactNode {
           </div>
 
           <nav className="space-y-1" aria-label="Workspace">
-            {(['profile', 'resume', 'learned', 'playground'] as const).map((candidate) => {
+            {(['profile', 'resume', 'history', 'learned', 'playground'] as const).map((candidate) => {
               const selected = tab === candidate;
               return (
                 <button
@@ -243,6 +252,7 @@ export function App(): ReactNode {
         wrote - without which the editor's next Save would overwrite it.
       */}
       {tab === 'resume' && <ResumeImport editsPending={dirty} onImported={reload} />}
+              {tab === 'history' && <History />}
               {tab === 'learned' && <LearnedRules />}
               {tab === 'playground' && <MappingPlayground profile={profile} />}
             </div>
@@ -257,6 +267,7 @@ function NavIcon({ tab, active }: { tab: Tab; active: boolean }): ReactNode {
   const paths: Record<Tab, ReactNode> = {
     profile: <><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" /></>,
     resume: <><path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" /></>,
+    history: <><path d="M4 12a8 8 0 1 0 2.5-5.8M4 5.5V10h4.5" /><path d="M12 8v4.5l3 1.8" /></>,
     learned: <><path d="M12 3.5a6 6 0 0 0-3.8 10.6c.8.7 1.3 1.5 1.3 2.4h5c0-.9.5-1.7 1.3-2.4A6 6 0 0 0 12 3.5Z" /><path d="M9.7 20h4.6M10 17h4" /></>,
     playground: <><path d="m8 3 1.2 3.2L12.5 7.5 9.2 8.8 8 12 6.8 8.8 3.5 7.5l3.3-1.3z" /><path d="m16.5 11 1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z" /></>,
   };
