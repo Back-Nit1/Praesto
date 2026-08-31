@@ -78,6 +78,57 @@ describe('profile editor - typing is verification', () => {
   });
 });
 
+describe('profile editor - nothing blank or malformed is "verified"', () => {
+  it('clears a field rather than storing an empty verified string', () => {
+    const { latest } = renderEditor();
+    type(/legal first name/i, 'Nityanth');
+    type(/legal first name/i, '   ');
+
+    // Not `{ value: '', verifiedByUser: true }`. That combination is the worst
+    // of both: reported as a value the applicant vouched for, and useless.
+    expect(latest().identity.legalFirstName.value).toBeNull();
+    expect(latest().identity.legalFirstName.evidence).toHaveLength(0);
+  });
+
+  it('refuses to verify a malformed email, and keeps what was typed', () => {
+    const { latest } = renderEditor();
+    type(/email/i, 'nitu@@example');
+
+    expect(latest().contact.email.value).toBeNull();
+    expect(isVerified(latest().contact.email)).toBe(false);
+    // Kept, so the user is not silently retyping from scratch.
+    expect(latest().contact.email.raw).toBe('nitu@@example');
+    // And said out loud, rather than left as a badge to hover over.
+    expect(screen.getByText(/not a shape we recognise as an email/i)).toBeTruthy();
+  });
+
+  it('stores a valid email trimmed and verified', () => {
+    const { latest } = renderEditor();
+    type(/email/i, '  nitu@example.com  ');
+
+    expect(latest().contact.email.value).toBe('nitu@example.com');
+    expect(isVerified(latest().contact.email)).toBe(true);
+  });
+
+  it('refuses a link that is not a web address', () => {
+    const { latest } = renderEditor();
+    type(/linkedin/i, 'javascript:alert(1)');
+
+    expect(latest().links.linkedin.value).toBeNull();
+    expect(isVerified(latest().links.linkedin)).toBe(false);
+  });
+
+  it('stores an empty list as missing, not as a verified empty list', () => {
+    const { latest } = renderEditor();
+    type(/skills/i, 'react');
+    expect(latest().skills.value).toEqual(['react']);
+
+    type(/skills/i, ' , , ');
+    expect(latest().skills.value).toBeNull();
+    expect(latest().skills.evidence).toHaveLength(0);
+  });
+});
+
 describe('profile editor - comma lists', () => {
   it('does not eat the separator while the user is still typing', () => {
     // The regression: the stored value is a parsed array, so rendering it back

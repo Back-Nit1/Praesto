@@ -34,6 +34,12 @@ import { newId } from '@shared/ids';
 import { formatDate, parseDate, type NormalizedDate } from '@profile/normalizers/date';
 import { parsePhone } from '@profile/normalizers/phone';
 import {
+  isBlank,
+  matchesFormat,
+  trimValue,
+  type ValueFormat,
+} from '@profile/validation';
+import {
   emptyValue,
   userValue,
   valueState,
@@ -55,8 +61,63 @@ interface ProfileEditorProps {
  */
 const text = (value: ProfileValue<string>): string => value.value ?? '';
 
-/** Map a stored value onto the four display states. */
-const stateOf = (value: ProfileValue<unknown>): FieldState => valueState(value) as FieldState;
+/**
+ * Map a stored value onto the four display states.
+ *
+ * One case is decided here rather than in `valueState`: a value that is null
+ * but still carries the text the user typed is something we could not READ,
+ * not something they never provided. The schema cannot tell those apart - both
+ * are `value: null` - but this screen can, and the difference is exactly what
+ * the user needs to see. "Not provided" next to a box containing
+ * "nitu@@example" would be nonsense.
+ */
+const stateOf = (value: ProfileValue<unknown>): FieldState => {
+  if (value.value === null && value.raw !== undefined && !isBlank(value.raw)) {
+    return 'needs_review';
+  }
+  return valueState(value) as FieldState;
+};
+
+/**
+ * Wrap what the user typed, refusing to call it verified unless it is.
+ *
+ * THE RULE THIS ENFORCES. `userValue()` stamps `verifiedByUser: true,
+ * confidence: 1` on anything handed to it, and that flag is what unlocks
+ * autofilling a legal question. So it must not be reachable from an empty
+ * field or from a half-typed address:
+ *
+ *   blank    -> a missing value, with no evidence at all. The user clearing a
+ *               field means "I do not have this", and it must read back as
+ *               that rather than as a value they vouched for.
+ *   invalid  -> value null, raw KEPT. Nothing they typed is thrown away, and
+ *               the badge says "needs review" instead of claiming certainty.
+ *   valid    -> verified, stored trimmed.
+ *
+ * The trimmed form is what gets stored: a trailing space in an email is the
+ * kind of thing that fails an ATS's own validation and looks, to the
+ * applicant, like the extension typed it wrong.
+ */
+/**
+ * The message for a value we could not read, or the field's normal hint.
+ *
+ * Says what is wrong AND what the consequence is. "That does not look like an
+ * email address" on its own reads as pedantry; "...so it will not be filled"
+ * is the part that tells the user whether to care.
+ */
+function hintFor(
+  value: ProfileValue<unknown>,
+  problem: string,
+  normal?: string,
+): string | undefined {
+  const unreadable = value.value === null && value.raw !== undefined && !isBlank(value.raw);
+  return unreadable ? problem : normal;
+}
+
+function typedValue(raw: string, format: ValueFormat = 'text'): ProfileValue<string> {
+  if (isBlank(raw)) return emptyValue<string>();
+  if (!matchesFormat(raw, format)) return { value: null, raw, evidence: [] };
+  return userValue(trimValue(raw), raw);
+}
 
 /**
  * A list, rendered for editing as one comma-separated line.
@@ -72,11 +133,34 @@ const list = (value: ProfileValue<string[]>): string =>
   // typing makes the field impossible to type in.
   value.raw ?? (value.value ?? []).join(', ');
 
-const parseList = (input: string): string[] =>
-  input
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+/**
+ * Split a comma-separated line into its items.
+ *
+ * Hand-rolled rather than `split().map().filter()`, which allocates three
+ * arrays and a trimmed string per item to produce one array. This walks the
+ * line once and allocates only the items it actually keeps - which matters
+ * because it runs on every keystroke of a forty-item skills list.
+ */
+const parseList = (input: string): string[] => {
+  const items: string[] = [];
+  let start = 0;
+
+  for (let index = 0; index <= input.length; index++) {
+    // The end of the string closes the final item, so the loop runs one past.
+    if (index !== input.length && input.charCodeAt(index) !== 0x2c) continue;
+    const item = trimValue(input.slice(start, index));
+    if (item.length > 0) items.push(item);
+    start = index + 1;
+  }
+
+  return items;
+};
+
+/** A list the user typed. Empty means missing, never a verified empty list. */
+function typedList(raw: string): ProfileValue<string[]> {
+  const items = parseList(raw);
+  return items.length === 0 ? emptyValue<string[]>() : userValue(items, raw);
+}
 
 /**
  * Display a stored date as text the user can edit.
@@ -104,9 +188,23 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
   function setIdentity(field: keyof ApplicantProfile['identity'], next: string): void {
     edit((current) => ({
       ...current,
-      identity: { ...current.identity, [field]: userValue(next) },
+      identity: { ...current.identity, [field]: typedValue(next) },
     }));
   }
+
+  /**
+   * Contact fields, each validated as the shape it claims to be.
+   *
+   * The email case is the one that mattered: `contact.email` is declared in the
+   * schema as `z.string().email()`, so a malformed address typed here was
+   * stored happily and then failed VALIDATION ON RELOAD - the whole profile
+   * refusing to load with "Stored profile failed validation". Catching it at
+   * the keystroke turns a corrupted profile into a "needs review" badge.
+   */
+  const CONTACT_FORMATS: Partial<Record<keyof ApplicantProfile['contact'], ValueFormat>> = {
+    email: 'email',
+    postalCode: 'postal_code',
+  };
 
   function setContactString(
     field: Exclude<keyof ApplicantProfile['contact'], 'phone'>,
@@ -114,22 +212,27 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
   ): void {
     edit((current) => ({
       ...current,
-      contact: { ...current.contact, [field]: userValue(next) },
+      contact: { ...current.contact, [field]: typedValue(next, CONTACT_FORMATS[field] ?? 'text') },
     }));
   }
 
   function setLink(field: keyof Omit<ApplicantProfile['links'], 'other'>, next: string): void {
     edit((current) => ({
       ...current,
-      links: { ...current.links, [field]: userValue(next) },
+      links: { ...current.links, [field]: typedValue(next, 'url') },
     }));
   }
 
   /** Anything else the user wants available: Twitter, Scholar, Dribbble. */
-  function setOtherLinks(next: string[]): void {
+  function setOtherLinks(raw: string): void {
     edit((current) => ({
       ...current,
-      links: { ...current.links, other: next.map((link) => userValue(link)) },
+      links: {
+        ...current.links,
+        // Each link validated on its own: one mistyped entry marks itself for
+        // review instead of discrediting the whole line.
+        other: parseList(raw).map((link) => typedValue(link, 'url')),
+      },
     }));
   }
 
@@ -211,13 +314,13 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       ...current,
       applicationPreferences: {
         ...current.applicationPreferences,
-        preferredLocations: userValue(parseList(raw), raw),
+        preferredLocations: typedList(raw),
       },
     }));
   }
 
   function setSkills(raw: string): void {
-    edit((current) => ({ ...current, skills: userValue(parseList(raw), raw) }));
+    edit((current) => ({ ...current, skills: typedList(raw) }));
   }
 
   function setDemographicString(
@@ -230,7 +333,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         ...current.demographics,
         // An emptied field clears the answer rather than storing "", so
         // "I have not answered" survives a typo-and-delete.
-        [field]: next.trim().length === 0 ? emptyValue<string>() : userValue(next),
+        [field]: typedValue(next),
       },
     }));
   }
@@ -240,8 +343,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       ...current,
       demographics: {
         ...current.demographics,
-        raceEthnicity:
-          raw.trim().length === 0 ? emptyValue<string[]>() : userValue(parseList(raw), raw),
+        raceEthnicity: typedList(raw),
       },
     }));
   }
@@ -321,16 +423,28 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       <Section title="Contact">
         <Field
           label="Email"
-          value={text(profile.contact.email)}
+          value={profile.contact.email.raw ?? text(profile.contact.email)}
           state={stateOf(profile.contact.email)}
           onChange={(next) => setContactString('email', next)}
+          {...hintProp(
+            hintFor(
+              profile.contact.email,
+              'That is not a shape we recognise as an email address, so it will not be filled.',
+            ),
+          )}
         />
         <Field
           label="Phone"
           value={profile.contact.phone.raw ?? profile.contact.phone.value?.raw ?? ''}
           state={stateOf(profile.contact.phone)}
           onChange={setPhone}
-          hint="Stored once, then rendered in whatever format each application asks for."
+          hint={
+            hintFor(
+              profile.contact.phone,
+              'We could not read that as a phone number, so it will not be filled.',
+              'Stored once, then rendered in whatever format each application asks for.',
+            ) ?? ''
+          }
         />
         <Field
           label="Address line 1"
@@ -359,9 +473,12 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           />
           <Field
             label="Postal code"
-            value={text(profile.contact.postalCode)}
+            value={profile.contact.postalCode.raw ?? text(profile.contact.postalCode)}
             state={stateOf(profile.contact.postalCode)}
             onChange={(next) => setContactString('postalCode', next)}
+            {...hintProp(
+              hintFor(profile.contact.postalCode, 'That does not look like a postal code.'),
+            )}
           />
         </div>
         <Field
@@ -375,28 +492,46 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       <Section title="Links">
         <Field
           label="LinkedIn"
-          value={text(profile.links.linkedin)}
+          value={profile.links.linkedin.raw ?? text(profile.links.linkedin)}
           state={stateOf(profile.links.linkedin)}
           onChange={(next) => setLink('linkedin', next)}
+          {...hintProp(
+            hintFor(
+              profile.links.linkedin,
+              'That does not look like a web address, so it will not be filled.',
+            ),
+          )}
           placeholder="https://www.linkedin.com/in/..."
         />
         <Field
           label="GitHub"
-          value={text(profile.links.github)}
+          value={profile.links.github.raw ?? text(profile.links.github)}
           state={stateOf(profile.links.github)}
           onChange={(next) => setLink('github', next)}
+          {...hintProp(
+            hintFor(
+              profile.links.github,
+              'That does not look like a web address, so it will not be filled.',
+            ),
+          )}
         />
         <Field
           label="Portfolio / website"
-          value={text(profile.links.portfolio)}
+          value={profile.links.portfolio.raw ?? text(profile.links.portfolio)}
           state={stateOf(profile.links.portfolio)}
           onChange={(next) => setLink('portfolio', next)}
+          {...hintProp(
+            hintFor(
+              profile.links.portfolio,
+              'That does not look like a web address, so it will not be filled.',
+            ),
+          )}
         />
         <CommaListField
           label="Other links"
           value={profile.links.other.map((link) => link.value ?? '').join(', ')}
           state={profile.links.other.length > 0 ? 'verified' : 'missing'}
-          onChange={(next) => setOtherLinks(parseList(next))}
+          onChange={setOtherLinks}
           hint="Anything else worth sending: Scholar, Dribbble, a personal blog. Separate them with commas."
         />
       </Section>
@@ -588,21 +723,21 @@ function EducationEntry({
         label="School"
         value={text(entry.institution)}
         state={stateOf(entry.institution)}
-        onChange={(next) => set('institution', userValue(next))}
+        onChange={(next) => set('institution', typedValue(next))}
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
           label="Degree"
           value={text(entry.degree)}
           state={stateOf(entry.degree)}
-          onChange={(next) => set('degree', userValue(next))}
+          onChange={(next) => set('degree', typedValue(next))}
           placeholder="Bachelor of Science"
         />
         <Field
           label="Field of study"
           value={text(entry.fieldOfStudy)}
           state={stateOf(entry.fieldOfStudy)}
-          onChange={(next) => set('fieldOfStudy', userValue(next))}
+          onChange={(next) => set('fieldOfStudy', typedValue(next))}
         />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -620,7 +755,7 @@ function EducationEntry({
           label="GPA"
           value={text(entry.gpa)}
           state={stateOf(entry.gpa)}
-          onChange={(next) => set('gpa', userValue(next))}
+          onChange={(next) => set('gpa', typedValue(next))}
           /* Stored exactly as written: "3.8/4.0" and "First Class Honours" are
              both real answers, and parsing either into a number would destroy
              the scale the institution actually issued. */
@@ -658,20 +793,20 @@ function EmploymentEntry({
           label="Employer"
           value={text(entry.company)}
           state={stateOf(entry.company)}
-          onChange={(next) => set('company', userValue(next))}
+          onChange={(next) => set('company', typedValue(next))}
         />
         <Field
           label="Job title"
           value={text(entry.title)}
           state={stateOf(entry.title)}
-          onChange={(next) => set('title', userValue(next))}
+          onChange={(next) => set('title', typedValue(next))}
         />
       </div>
       <Field
         label="Location"
         value={text(entry.location)}
         state={stateOf(entry.location)}
-        onChange={(next) => set('location', userValue(next))}
+        onChange={(next) => set('location', typedValue(next))}
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <DateField
@@ -707,7 +842,7 @@ function EmploymentEntry({
         label="What you did"
         value={text(entry.description)}
         state={stateOf(entry.description)}
-        onChange={(next) => set('description', userValue(next))}
+        onChange={(next) => set('description', typedValue(next))}
         hint="Used for a free-text 'describe your experience' box. Nothing is ever generated for you."
       />
     </EntryCard>
@@ -739,27 +874,27 @@ function ProjectEntry({
           label="Project name"
           value={text(entry.name)}
           state={stateOf(entry.name)}
-          onChange={(next) => set('name', userValue(next))}
+          onChange={(next) => set('name', typedValue(next))}
         />
         <Field
           label="Link"
           value={text(entry.url)}
           state={stateOf(entry.url)}
-          onChange={(next) => set('url', userValue(next))}
+          onChange={(next) => set('url', typedValue(next, 'url'))}
         />
       </div>
       <CommaListField
         label="Technologies"
         value={list(entry.technologies)}
         state={stateOf(entry.technologies)}
-        onChange={(next) => set('technologies', userValue(parseList(next), next))}
+        onChange={(next) => set('technologies', typedList(next))}
         hint="Comma separated."
       />
       <TextAreaField
         label="Description"
         value={text(entry.description)}
         state={stateOf(entry.description)}
-        onChange={(next) => set('description', userValue(next))}
+        onChange={(next) => set('description', typedValue(next))}
       />
     </EntryCard>
   );
@@ -864,6 +999,17 @@ function CommaListField({
       {...(hint !== undefined ? { hint } : {})}
     />
   );
+}
+
+/**
+ * Spread a hint prop only when there is a hint.
+ *
+ * `exactOptionalPropertyTypes` makes `hint={undefined}` a type error on a
+ * `hint?: string` prop - the property may be absent, not present-and-undefined
+ * - so the choice has to be made at the spread rather than at the value.
+ */
+function hintProp(hint: string | undefined): { hint?: string } {
+  return hint === undefined ? {} : { hint };
 }
 
 /** A multi-line field, for the two places a paragraph is the right answer. */
