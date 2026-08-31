@@ -55,17 +55,16 @@ import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprin
 import { mapField, type CollectionEntryIndexes } from '@form-engine/mapper/mapper';
 import { isResumeField } from '@form-engine/mapper/resume-field';
 import { resolveValue } from '@form-engine/resolver/resolver';
-import { decideFill, DEFAULT_CONFIDENCE_POLICY } from '@form-engine/confidence/policy';
+import { decideFill } from '@form-engine/confidence/policy';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
 import { BackendGateway } from '@backend/gateway';
 import { createSemanticPort } from '@backend/semantic';
 import {
-  chooseOption,
-  collectRefusals,
-  resolveConcepts,
+  applySemanticFallback,
+  summariseRun,
   SemanticConceptCache,
-  type ConceptResolution,
   type FieldOutcome,
+  type SemanticFieldUpdate,
 } from '@semantic/index';
 
 const log = createLogger('background');
@@ -128,7 +127,14 @@ export default defineBackground(() => {
    * therefore touches neither.
    */
   const semanticCache = new SemanticConceptCache(store);
-  const semanticPort = createSemanticPort(new BackendGateway(store));
+  /**
+   * Held rather than inlined into the port, because `usage()` is how the panel
+   * learns how many AI answers are left today. Brief §5: a rate limit must be
+   * surfaced, not silently swallowed - a user whose fields quietly stop
+   * improving has no way to tell that from the feature simply not helping.
+   */
+  const semanticGateway = new BackendGateway(store);
+  const semanticPort = createSemanticPort(semanticGateway);
 
   /**
    * Storage readiness, tracked per worker instance.
@@ -510,10 +516,32 @@ export default defineBackground(() => {
       }
     }
 
-    // The semantic fallback, on the refusals only. Costs nothing - no storage
-    // read, no request - when the queue is empty, which is every form the
-    // deterministic pipeline already understood.
-    await applySemanticFallback(profile, outcomes, actions, auditFields);
+    /**
+     * The semantic fallback, on the refusals only.
+     *
+     * Costs nothing - no storage read, no request - when the queue is empty,
+     * which is every form the deterministic pipeline already understood. It
+     * returns UPDATES rather than mutating: it has no way to express "leave
+     * that field worse than you found it", so a failure of any kind is exactly
+     * today's behaviour.
+     */
+    const semantic = await applySemanticFallback({
+      profile,
+      outcomes,
+      port: semanticPort,
+      cache: semanticCache,
+    });
+    applyUpdates(semantic.updates, actions, auditFields);
+
+    /**
+     * Reported only when the pass actually ran. The quota is read ONLY on a
+     * failure: `usage()` is a storage read, and spending one on every scan to
+     * tell the user something they did not ask about is the wrong trade.
+     */
+    const semanticSummary =
+      semantic.modelCalls === 0 && semantic.error === undefined && semantic.updates.length === 0
+        ? undefined
+        : summariseRun(semantic, semantic.error !== undefined ? await readUsage() : undefined);
 
     await stashScan(request, senderTabId, auditFields);
 
@@ -528,6 +556,10 @@ export default defineBackground(() => {
       type: 'RESOLVE_APPLICATION_FIELDS_RESULT',
       actions,
       summary: { detected: request.fields.length, readyToFill, needsReview, unknown },
+      // Omitted entirely when the fallback did not run, so its absence means
+      // "there was nothing it could have helped with" rather than "it failed
+      // silently".
+      ...(semanticSummary !== undefined ? { semantic: semanticSummary } : {}),
     };
   }
 
@@ -691,206 +723,74 @@ export default defineBackground(() => {
   }
 
   /**
-   * The semantic fallback, applied to the fields the pipeline refused.
+   * The gateway's daily counter, or nothing.
    *
-   * REPLACES `skip` actions in place; it can never downgrade one. A field the
-   * deterministic pipeline decided to fill is not reconsidered here, and a
-   * field this pass cannot improve keeps the refusal it already had - which is
-   * what makes "with the network disabled, behaviour is byte-for-byte today's"
-   * true by construction rather than by testing every failure path.
-   *
-   * The ordering is the brief's, and each step is cheaper than the next:
-   *
-   *   queue     -> free. Empty on a form we understood, and then this returns
-   *                without reading storage or opening a socket.
-   *   stage 1   -> cache first, then ONE batched call for what is left.
-   *   resolve   -> the EXISTING resolver, unchanged.
-   *   stage 2   -> the deterministic scorer, then at most one call per field.
-   *   decideFill-> the EXISTING policy, unchanged. This is the entire safety
-   *                story and this function does not reimplement any of it.
-   *
-   * Every failure degrades to the refusal that was already there. Nothing here
-   * throws: a semantic pass that broke a scan would be far worse than one that
-   * did nothing.
+   * A failure to read it is not worth reporting: we are already reporting a
+   * failure, and "we could not tell you how much is left" would replace a
+   * useful message with a confusing one.
    */
-  async function applySemanticFallback(
-    profile: Parameters<typeof resolveValue>[0],
-    outcomes: readonly FieldOutcome[],
-    actions: ResolvedFieldAction[],
-    auditFields: PendingFieldAudit[],
-  ): Promise<void> {
-    const refusals = collectRefusals(outcomes);
-    if (refusals.length === 0) return;
-
+  async function readUsage(): Promise<
+    { used: number; limit: number; resetsInMs: number } | undefined
+  > {
     try {
-      const byField = new Map(actions.map((action, index) => [action.localId, index]));
-      const descriptors = new Map(refusals.map((field) => [field.fieldId, field.descriptor]));
-
-      /** Overwrite a field's action and its history row together. */
-      const replace = (
-        localId: string,
-        action: ResolvedFieldAction,
-        audit: Partial<PendingFieldAudit>,
-      ): void => {
-        const index = byField.get(localId);
-        if (index === undefined) return;
-        actions[index] = action;
-
-        const row = auditFields[index];
-        if (row !== undefined) auditFields[index] = { ...row, ...audit };
-      };
-
-      // --- stage 1: what are these questions asking? ------------------------
-      const { resolutions } = await resolveConcepts({
-        fields: refusals,
-        port: semanticPort,
-        cache: semanticCache,
-      });
-
-      for (const concept of resolutions) {
-        const descriptor = descriptors.get(concept.fieldId);
-        if (descriptor === undefined) continue;
-        applyConcept(profile, descriptor, concept, replace);
-      }
-
-      // --- stage 2: our answer against this control's options ---------------
-      for (const field of refusals) {
-        if (field.kind !== 'no_matching_option' || field.profilePath === null) continue;
-        await applyOptionChoice(profile, field.descriptor, field.profilePath, replace);
-      }
+      return await semanticGateway.usage();
     } catch (error) {
-      // Unreachable by design - every module below returns a Result - so
-      // reaching it is a bug worth a log line, and the fields keep the
-      // refusals they already had.
-      log.warn('Semantic fallback failed; fields keep their refusals', toAppError(error).message);
+      log.debugLazy(() => ['Could not read model quota', toAppError(error).message]);
+      return undefined;
     }
   }
 
-  /** One stage-1 concept, through the existing resolver and the existing policy. */
-  function applyConcept(
-    profile: Parameters<typeof resolveValue>[0],
-    descriptor: FieldDescriptor,
-    concept: ConceptResolution,
-    replace: (
-      localId: string,
-      action: ResolvedFieldAction,
-      audit: Partial<PendingFieldAudit>,
-    ) => void,
+  /**
+   * Splice the semantic pass's updates into the actions and the history rows.
+   *
+   * Kept here rather than in `@semantic` because `ResolvedFieldAction` and
+   * `PendingFieldAudit` are this layer's vocabulary - a wire type and a history
+   * type. The semantic package returns what it decided; translating that into
+   * what the page and the history each need is the entrypoint's job, and
+   * keeping it that way is why `@semantic` has no idea a message format exists.
+   *
+   * The two are written TOGETHER, always. A history row that disagreed with the
+   * action the page received would describe a decision that was never made.
+   */
+  function applyUpdates(
+    updates: readonly SemanticFieldUpdate[],
+    actions: ResolvedFieldAction[],
+    auditFields: PendingFieldAudit[],
   ): void {
-    const resolution = resolveValue(profile, concept.profilePath, descriptor);
-    // Understanding the question does not mean we have the answer. A profile
-    // gap is still a profile gap, and the existing skip explains it better than
-    // anything this pass could say.
-    if (!resolution.ok) return;
+    if (updates.length === 0) return;
+    const indexOf = new Map(actions.map((action, index) => [action.localId, index]));
 
-    const decision = decideFill({
-      mappingConfidence: concept.confidence,
-      valueConfidence: resolution.resolved.confidence,
-      valueVerifiedByUser: resolution.resolved.verifiedByUser,
-      profilePath: concept.profilePath,
-      valueMissing: false,
-      controlHasValue: (descriptor.currentValue ?? '').trim().length > 0,
-    });
-    // 'autofill' is unreachable while `sourceScores.semantic` stays below
-    // `autofillThreshold`, which is by construction - but the mapping is
-    // written to honour whatever the policy says rather than to assume it.
-    if (decision === 'skip') return;
+    for (const update of updates) {
+      const index = indexOf.get(update.localId);
+      if (index === undefined) continue;
 
-    const optionValue = resolution.resolved.option?.value;
-    const decided = decision === 'autofill' ? ('fill' as const) : ('suggest' as const);
+      const previous = actions[index];
+      if (previous === undefined) continue;
 
-    replace(
-      descriptor.localId,
-      {
-        localId: descriptor.localId,
-        action: decided,
-        profilePath: concept.profilePath,
-        mappingConfidence: concept.confidence,
-        // 'previously_seen' for a cache hit is the state the spec already
-        // defines for "the user has answered this exact question before".
-        knowledgeState: concept.origin === 'cache' ? 'previously_seen' : 'probable',
-        controlKind: descriptor.kind,
-        value: resolution.resolved.value,
-        ...(optionValue !== undefined ? { optionValue } : {}),
-        explanation: `${labelForPath(concept.profilePath)} (semantic${concept.origin === 'cache' ? ', remembered' : ''})`,
-      },
-      {
-        mappedProfilePath: concept.profilePath,
-        mappingConfidence: concept.confidence,
-        mappingSource: 'semantic',
-        decidedAction: decided,
-      },
-    );
-  }
+      actions[index] = {
+        localId: update.localId,
+        action: update.action,
+        profilePath: update.profilePath,
+        mappingConfidence: update.mappingConfidence,
+        knowledgeState: update.knowledgeState,
+        ...(previous.controlKind !== undefined ? { controlKind: previous.controlKind } : {}),
+        value: update.value,
+        ...(update.optionValue !== undefined ? { optionValue: update.optionValue } : {}),
+        explanation: update.explanation,
+      };
 
-  /** One stage-2 option match, for a field whose concept was never in doubt. */
-  async function applyOptionChoice(
-    profile: Parameters<typeof resolveValue>[0],
-    descriptor: FieldDescriptor,
-    profilePath: string,
-    replace: (
-      localId: string,
-      action: ResolvedFieldAction,
-      audit: Partial<PendingFieldAudit>,
-    ) => void,
-  ): Promise<void> {
-    /**
-     * The value as TEXT, obtained by resolving against the same control with
-     * its options removed.
-     *
-     * Reuses the resolver's own scalar rendering rather than reaching into the
-     * profile here: dates and phone numbers have control-dependent renderings
-     * that this file has no business knowing about, and a second implementation
-     * of "how does this value read" is how the two would drift.
-     */
-    const { options: _options, ...withoutOptions } = descriptor;
-    const asText = resolveValue(profile, profilePath, withoutOptions);
-    if (!asText.ok || typeof asText.resolved.value !== 'string') return;
-
-    const chosen = await chooseOption({
-      fieldId: descriptor.localId,
-      value: asText.resolved.value,
-      options: descriptor.options ?? [],
-      port: semanticPort,
-    });
-    if (chosen.option === null) return;
-
-    const decision = decideFill({
-      // The MAPPING was never in doubt here - the cascade named this path with
-      // its own confidence, and only the option match failed. But the match is
-      // what this pass supplied, so it is scored as a semantic result: an
-      // option we chose rather than matched must be read by the user.
-      mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
-      valueConfidence: asText.resolved.confidence,
-      valueVerifiedByUser: asText.resolved.verifiedByUser,
-      profilePath,
-      valueMissing: false,
-      controlHasValue: (descriptor.currentValue ?? '').trim().length > 0,
-    });
-    if (decision === 'skip') return;
-
-    const decided = decision === 'autofill' ? ('fill' as const) : ('suggest' as const);
-
-    replace(
-      descriptor.localId,
-      {
-        localId: descriptor.localId,
-        action: decided,
-        profilePath,
-        mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
-        knowledgeState: 'probable',
-        controlKind: descriptor.kind,
-        value: chosen.option.value,
-        optionValue: chosen.option.value,
-        explanation: `${labelForPath(profilePath)} (matched to "${chosen.option.label}")`,
-      },
-      {
-        mappedProfilePath: profilePath,
-        mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
-        mappingSource: 'semantic',
-        decidedAction: decided,
-      },
-    );
+      const row = auditFields[index];
+      if (row !== undefined) {
+        auditFields[index] = {
+          ...row,
+          mappedProfilePath: update.profilePath,
+          mappingConfidence: update.mappingConfidence,
+          // The `MappingSource` the spec declared for this and left unwired.
+          mappingSource: 'semantic',
+          decidedAction: update.action,
+        };
+      }
+    }
   }
 
   /**

@@ -36,9 +36,11 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BrandMark, Button, StateBadge, StatusLine, type FieldState } from '@/components/ui';
-import type { ResolvedFieldAction } from '@shared/messages';
+import type { ResolvedFieldAction, SemanticRunSummary } from '@shared/messages';
 import {
   describeFillFailure,
+  describeQuotaReset,
+  SEMANTIC_FAILURE_TEXT,
   type ContentErrorResponse,
   type ContentFillResponse,
   type ContentScanResponse,
@@ -165,6 +167,14 @@ type PanelState =
       fieldsDetected: number;
       /** localId -> what actually happened. Absent until a fill has run. */
       outcomes: Record<string, FieldFillReport>;
+      /**
+       * What the AI fallback cost on this scan, when it ran at all.
+       *
+       * Absent on most scans, and the absence is meaningful: a form the
+       * deterministic engine understood produces no refusals, so the fallback
+       * never runs and the panel stays silent about it.
+       */
+      semantic?: SemanticRunSummary;
       /**
        * localId -> the frame that owns the element.
        *
@@ -509,6 +519,15 @@ export function App(): ReactNode {
     const frameByLocalId: Record<string, number> = {};
     let fieldsDetected = 0;
     const errors: ContentErrorResponse[] = [];
+    /**
+     * The AI fallback's report, merged across frames.
+     *
+     * An application is frequently split between the employer's page and an
+     * embedded ATS iframe, so the fallback can run in either or both. A failure
+     * in ANY frame is worth reporting - the user's quota is shared across them,
+     * and a form half-helped is exactly when the explanation matters.
+     */
+    const semanticReports: SemanticRunSummary[] = [];
 
     for (const scan of scans) {
       if (scan.response === undefined) continue;
@@ -517,6 +536,7 @@ export function App(): ReactNode {
         continue;
       }
       fieldsDetected += scan.response.fieldsDetected;
+      if (scan.response.semantic !== undefined) semanticReports.push(scan.response.semantic);
       for (const action of scan.response.actions) {
         actions.push(action);
         frameByLocalId[action.localId] = scan.frameId;
@@ -547,7 +567,16 @@ export function App(): ReactNode {
       return;
     }
 
-    setState({ kind: 'scanned', actions, fieldsDetected, outcomes: {}, frameByLocalId });
+    const semantic = mergeSemanticReports(semanticReports);
+
+    setState({
+      kind: 'scanned',
+      actions,
+      fieldsDetected,
+      outcomes: {},
+      frameByLocalId,
+      ...(semantic !== undefined ? { semantic } : {}),
+    });
 
     /**
      * Which embedded sites we could not read.
@@ -923,6 +952,7 @@ export function App(): ReactNode {
           actions={state.actions}
           fieldsDetected={state.fieldsDetected}
           {...(state.restoredAt !== undefined ? { restoredAt: state.restoredAt } : {})}
+          {...(state.semantic !== undefined ? { semantic: state.semantic } : {})}
           outcomes={state.outcomes}
           busy={busy}
           onFill={(requested) => void handleFill(requested)}
@@ -1180,12 +1210,61 @@ function formatClockTime(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * Combine the AI fallback's report from every frame that ran one.
+ *
+ * A FAILURE WINS OVER SILENCE, and a rate limit wins over any other failure.
+ * The reasoning is about what the user can do: "you are out of AI answers"
+ * changes their expectations for the rest of today, while "unavailable" changes
+ * nothing they control - so if both happened, the first is the one worth the
+ * line of space.
+ */
+function mergeSemanticReports(
+  reports: readonly SemanticRunSummary[],
+): SemanticRunSummary | undefined {
+  if (reports.length === 0) return undefined;
+
+  const modelCalls = reports.reduce((total, report) => total + report.modelCalls, 0);
+  const failures = reports.flatMap((report) => (report.error !== undefined ? [report.error] : []));
+  const worst = failures.find((error) => error.kind === 'rate_limited') ?? failures[0];
+  const quota = reports.find((report) => report.quota !== undefined)?.quota;
+
+  return {
+    modelCalls,
+    ...(worst !== undefined ? { error: worst } : {}),
+    ...(quota !== undefined ? { quota } : {}),
+  };
+}
+
+/**
+ * One line about the AI fallback, shown ONLY when something went wrong.
+ *
+ * Silent on success by design, including when it did useful work. The user
+ * asked for their form to be filled, not for a status report on a subsystem,
+ * and a panel that narrates its own internals every scan is one the user stops
+ * reading - which is the same failure mode as a noisy suggestion list.
+ */
+function SemanticNotice({ summary }: { summary?: SemanticRunSummary }): ReactNode {
+  const failure = summary?.error;
+  if (failure === undefined) return null;
+
+  const resetsIn = describeQuotaReset(failure.retryAfterMs);
+
+  return (
+    <p className="mt-2 text-[12px] leading-relaxed text-[var(--ink-2)]">
+      {SEMANTIC_FAILURE_TEXT[failure.kind]}
+      {resetsIn !== undefined ? ` They reset ${resetsIn}.` : ''}
+    </p>
+  );
+}
+
 function ScanReport({
   actions,
   fieldsDetected,
   outcomes,
   busy,
   restoredAt,
+  semantic,
   onFill,
   onRescan,
   onCorrect,
@@ -1196,6 +1275,8 @@ function ScanReport({
   busy: boolean;
   /** Epoch ms, present only when these rows came back from storage. */
   restoredAt?: number;
+  /** The AI fallback's report, when it ran. Absent on most scans. */
+  semantic?: SemanticRunSummary;
   onFill: (actions: ResolvedFieldAction[]) => void;
   onRescan: () => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
@@ -1309,6 +1390,12 @@ function ScanReport({
             </div>
           ))}
         </dl>
+
+        {/* Placed under the ledger deliberately. When the AI fallback could not
+            run, the grey bucket is larger than it would otherwise have been -
+            so the explanation belongs next to the count it explains, not in a
+            banner at the top of the panel competing with the result. */}
+        <SemanticNotice {...(semantic !== undefined ? { summary: semantic } : {})} />
 
         {/* Once every safe field has been attempted there is nothing left for
             a primary button to do, so it stops being one. A greyed-out slab
