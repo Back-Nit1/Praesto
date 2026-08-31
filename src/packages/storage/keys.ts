@@ -48,6 +48,21 @@ export const STORAGE_KEYS = {
   learnedMappings: `${PREFIX}:learning:mappings`,
 
   /**
+   * The semantic fallback's question/answer memory (spec section 20).
+   *
+   * DELIBERATELY NOT `learnedMappings`, even though both are
+   * fingerprint-to-path. That store's entries carry the USER's authority -
+   * `userConfirmed` is what lets a rule short-circuit the mapping cascade - and
+   * these carry a model's. Merging them would mean either lying about which is
+   * which, or teaching the mapper a third state on a boolean it branches on.
+   * See semantic/cache.ts for the full argument.
+   *
+   * A separate key is also what makes "forget what the model told us" and
+   * "forget what I taught you" two genuinely separate buttons in settings.
+   */
+  semanticConcepts: `${PREFIX}:semantic:concepts`,
+
+  /**
    * Per-install device token for the backend gateway.
    *
    * NOT an API key. It identifies THIS INSTALL to our own backend, which holds
