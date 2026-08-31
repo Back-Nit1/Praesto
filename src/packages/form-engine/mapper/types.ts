@@ -72,6 +72,27 @@ export interface MappingReason {
   detail?: string;
 }
 
+/**
+ * WHY a mapping produced no path.
+ *
+ * `profilePath: null` is one word for several different situations, and the
+ * semantic fallback has to tell them apart before it decides whether a field is
+ * worth a second attempt. Collapsing them is how "the user told us to leave
+ * this field alone" would become "ask a model about this field" - the
+ * extension quietly overruling its own user.
+ *
+ * Carried as structured data rather than inferred from `reasons[]`, because a
+ * reason is a free-text explanation for a human and matching on its prose is
+ * exactly the sort of coupling that breaks silently when the wording changes.
+ */
+export type MappingRefusalReason =
+  /** Nothing in the cascade recognised the question. The one worth retrying. */
+  | 'no_mapping'
+  /** The control is disabled or of a kind we cannot drive. */
+  | 'unfillable_control'
+  /** A user-confirmed rule says this field means nothing. An instruction. */
+  | 'user_declined';
+
 export interface FieldMappingResult {
   /** The descriptor's `localId`. Ties the result back to a DOM element. */
   fieldId: string;
@@ -79,6 +100,12 @@ export interface FieldMappingResult {
   profilePath: ProfilePath | null;
   /** 0..1. How sure we are about the mapping - NOT about the value. */
   confidence: number;
+  /**
+   * Present exactly when `profilePath` is null. Says which kind of refusal
+   * this was, so a downstream stage can retry the recoverable one and respect
+   * the other two.
+   */
+  refusalReason?: MappingRefusalReason;
   knowledgeState: KnowledgeState;
   /** Every signal that contributed, strongest first. */
   reasons: MappingReason[];
@@ -93,8 +120,19 @@ export interface FieldMappingResult {
   alternatives?: Array<{ profilePath: ProfilePath; confidence: number }>;
 }
 
-/** The "we do not know" result. Its own constructor so it reads deliberately. */
-export function unknownMapping(fieldId: string, reasons: MappingReason[] = []): FieldMappingResult {
+/**
+ * The "we do not know" result. Its own constructor so it reads deliberately.
+ *
+ * `refusalReason` defaults to `no_mapping` - the recoverable case - because
+ * that is what the great majority of call sites mean. The two call sites that
+ * mean something stronger say so explicitly, and the type makes that visible at
+ * the call rather than requiring the reader to look here.
+ */
+export function unknownMapping(
+  fieldId: string,
+  reasons: MappingReason[] = [],
+  refusalReason: MappingRefusalReason = 'no_mapping',
+): FieldMappingResult {
   return {
     fieldId,
     profilePath: null,
@@ -102,5 +140,6 @@ export function unknownMapping(fieldId: string, reasons: MappingReason[] = []): 
     knowledgeState: 'unknown',
     reasons,
     source: 'none',
+    refusalReason,
   };
 }

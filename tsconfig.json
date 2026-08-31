@@ -32,7 +32,8 @@
       "@ats/*": ["./src/packages/ats/*"],
       "@learning/*": ["./src/packages/learning/*"],
       "@audit/*": ["./src/packages/audit/*"],
-      "@backend/*": ["./src/packages/backend/*"]
+      "@backend/*": ["./src/packages/backend/*"],
+      "@semantic/*": ["./src/packages/semantic/*"]
     }
   },
   "include": ["src", "tests", "e2e", "fixtures", "*.config.ts"]

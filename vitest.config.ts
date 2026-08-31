@@ -33,6 +33,10 @@ export default defineConfig({
       // The network gateway. Isolated in its own package so "what can this
       // extension talk to" is answerable by reading one directory.
       '@backend': r('./src/packages/backend'),
+      // The semantic fallback. Its own package so "what does this extension ask
+      // a model, and when" is answerable from one directory - and so the two
+      // stages can be unit tested against a fake port with no network at all.
+      '@semantic': r('./src/packages/semantic'),
     },
   },
   test: {

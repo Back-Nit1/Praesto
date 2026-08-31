@@ -163,9 +163,11 @@ export function mapField(
   // A control we cannot drive, or one the page has disabled, is not worth
   // mapping: even a perfect mapping could not be acted on.
   if (descriptor.kind === 'unsupported' || descriptor.disabled) {
-    return unknownMapping(descriptor.localId, [
-      { signal: 'option_shape', detail: 'Control is unsupported or disabled' },
-    ]);
+    return unknownMapping(
+      descriptor.localId,
+      [{ signal: 'option_shape', detail: 'Control is unsupported or disabled' }],
+      'unfillable_control',
+    );
   }
 
   const candidates: Candidate[] = [];
@@ -226,12 +228,16 @@ export function mapField(
   // place in the cascade where a candidate cancels the others rather than
   // being weighed against them.
   if (learnedMatch !== null && learnedMatch.userConfirmed && learnedMatch.profilePath === '') {
-    return unknownMapping(descriptor.localId, [
-      {
-        signal: 'learned_mapping',
-        detail: `You told us to leave this field alone (scope=${learnedMatch.scope})`,
-      },
-    ]);
+    return unknownMapping(
+      descriptor.localId,
+      [
+        {
+          signal: 'learned_mapping',
+          detail: `You told us to leave this field alone (scope=${learnedMatch.scope})`,
+        },
+      ],
+      'user_declined',
+    );
   }
 
   if (learnedMatch !== null) {
