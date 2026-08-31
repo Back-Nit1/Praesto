@@ -1,197 +1,239 @@
-# Gaps
+# Gaps in the semantic fallback
 
-Open gaps as of 2026-08-31. This file records what is **missing, unverified or
-undecided** — the complement to `IMPLEMENTATION_STATUS.md`, which records what
-is done. Where the status file already states a limitation honestly, this file
-does not repeat it; it points at it and says what would close it.
+**Written:** 2026-08-31, on landing `SEMANTIC_FILL_BRIEF.md`.
+**Status of that work:** steps 1–7 of the brief's §9 are done and committed;
+`npm run verify` is clean at 665 tests. This file is the other half of that
+sentence — what the work does **not** establish.
 
-Ordered by what blocks the most.
-
----
-
-## 1. Nothing has ever run against a real job application
-
-The semantic fallback, the fill engine, the option scorer and every ATS fixture
-are tested against **markup we wrote ourselves**. `IMPLEMENTATION_STATUS.md`
-says this plainly in two places and it remains the single largest unknown in the
-project. Fixtures encode what we believe real forms look like; only a real form
-can tell us where that belief is wrong.
-
-**To close:** apply to one real Greenhouse, one real Lever and one real Ashby
-posting. Capture each as an anonymised fixture **before** fixing anything
-against it. Every failure becomes a fixture and a failing test first.
-
-**Why it is first:** every other estimate in this file — how often the scorer
-fires, whether stage 2 is worth building, whether a backend is needed at all —
-is a guess until this happens.
+It exists because the product's entire claim is that it does not overstate what
+it knows, and a subsystem that asks a language model to read job-application
+questions is exactly the place where that claim is easiest to quietly break.
+`IMPLEMENTATION_STATUS.md` carries these as numbered limitations; this file says
+them in one place, with what it would take to close each.
 
 ---
 
-## 2. There is no backend, so both model stages are unreachable
+## 1. It has never run against a real application
 
-`WXT_BACKEND_ORIGIN` is set nowhere. There is no `.env`, and no service exists
-at the other end of `backend/semantic.ts`. The wire format, the port, the Zod
-schemas and the `connect-src` pin are all written and tested against fakes, but
-in any build produced today stage 1 and stage 2 cannot execute.
+**The gap.** Every fixture in `fixtures/forms/*-semantic.html` is markup *we*
+wrote from each ATS's published naming conventions. Nothing was captured from a
+real Greenhouse, Lever or Ashby form. Every test runs against
+`FakeSemanticPort`.
 
-This fails **closed** — a field stays refused, which is exactly today's
-behaviour — so it is not a bug. It does mean the model path has never run
-end to end against a real model, only against fakes.
+So what is proven is that the pipeline handles the **shape** of that markup and
+that the modules honour their own contracts. It is not proven that it handles
+Greenhouse.
 
-**To close:** decide whether the backend is worth building at all. Gap #3 says
-that decision should wait for gap #1.
+**Why it matters more here than elsewhere.** `engineering.md` already lists
+"tests are all against markup we wrote ourselves" as a standing weakness, and
+the mapper has survived it because an alias table is cheap to correct. This
+layer is different: a wrong concept costs a model call, enters the review list,
+and — if it is wrong often — trains the user to click through the review list
+without reading, which destroys the one step the whole product is built around.
 
----
+**To close it.** Acceptance criterion #2 of the brief. Capture each real form as
+an anonymised fixture **before** fixing anything against it, then a failing
+test, then a fix in the generic engine. Two numbers to record while doing it:
 
-## 3. Whether stage 2 (and the backend) earns its place is untested
-
-The deterministic scorer settles 10 of 13 corpus cases for free. The corpus is
-ours. If the real-form rate is similar, the model path is being built for a thin
-tail, and the honest answer may be to not build the backend at all and let the
-remaining fields stay refused.
-
-**To close:** instrument the scorer during gap #1 and count. Measure before
-building, per §9 step 4 of `SEMANTIC_FILL_BRIEF.md`.
-
-**Related, already decided:** there is deliberately **no similarity/Jaccard
-tier** in the scorer. `semantic/option-match.ts` argues that any threshold
-admitting the good cases also admits `Virginia` → `West Virginia` and `Newark` →
-`New York`. That is a considered refusal, not a missing feature; do not "fix" it
-without reading the header first.
+- **How many refusals the deterministic scorer actually settles.** The 10-of-13
+  figure in `tests/semantic/option-match.test.ts` is measured against a corpus
+  we invented. If the real number is much lower, the answer is a better scorer,
+  not a bigger quota — every case it settles is free, private and instant.
+- **Which questions stage 1 gets wrong.** A wrong concept is not a wrong fill,
+  but it is noise, and noise is what the point above is about.
 
 ---
 
-## 4. `tests/semantic/apply.test.ts` is red and untracked
+## 2. The backend endpoints do not exist
 
-A 273-line test exists for `src/packages/semantic/apply.ts`, which does not
-exist. This is a correct mid-TDD state — failing test written, module not — but
-it is untracked, so it is invisible to `git status` consumers and will fail
-`npm run check` for anyone who picks it up.
+**The gap.** `/v1/semantic/concepts` and `/v1/semantic/option` are fully
+specified by the schemas in `backend/schemas.ts` and are not implemented
+anywhere. No shipped build sets `WXT_BACKEND_ORIGIN` — it has been set once, in
+a throwaway build made only to confirm the origin reaches the manifest's
+`connect-src`.
 
-The test's own header states the reason the module should exist: the four-call
-sequencing currently lives in `background.ts` where nothing can test it, and the
-fixture test carries a second copy. Two implementations of "what order do these
-run in" is one more than can be right.
+**What that means today.** Every request fails, `summariseRun` reports
+`unavailable`, and every field keeps the refusal the deterministic pipeline
+already gave it. That is correct behaviour and it is tested — but it means the
+feature currently does nothing in a real browser, and no end-to-end path from
+question to filled field has ever executed.
 
-**To close:** write `semantic/apply.ts`, make the test pass, commit both. Small
-and well specified by the test that already exists.
-
----
-
-## 5. The cache's three narrower scopes have no writer
-
-`semantic/cache.ts` looks up across `exact_field → company → ats → global` but
-only ever **writes** `global`, because stage 1 deliberately sends no company,
-ATS or URL. The three narrower paths are therefore dead until something writes
-them.
-
-This is documented in the file header as a deliberate choice — the lookup shape
-avoids a later migration, and `global` is the scope that makes the second
-application free. Recorded here so it is a known open end rather than a
-discovery.
-
-**To close:** either give a narrower scope a writer, or delete the paths and the
-migration risk with them. Not urgent.
+**To close it.** Stand up the two endpoints against the schemas as written. The
+prompt on the backend side must keep the `untrusted` array structurally separate
+from its own instructions; that separation is the entire prompt-injection
+defence and the client cannot enforce it alone.
 
 ---
 
-## 6. Phase 8 is half-built
+## 3. The option scorer is deliberately weak in the middle
 
-The repeated-question cache works. **Approving and editing free-text answers
-does not exist.** `IMPLEMENTATION_STATUS.md` marks Phase 8 "partly done" for
-this reason.
+**Not a defect — a calibration, recorded here so it is not "fixed" by accident.**
 
-This is the seam the free-response work in gap #7 plugs into.
+`option-match.ts` settles exact matches, case and punctuation differences,
+reordered labels ("Computer Engineering" / "Engineering, Computer") and guarded
+containment. It has **no general similarity tier**, because any Jaccard or
+edit-distance threshold that admits the good cases also admits "Virginia"
+against "West Virginia" — and the failure that produces is not a blank field but
+a confident wrong one, on a job application.
+
+**What it costs, concretely.** A single-token value against a longer option
+("Rutgers" against "Rutgers University - Newark") always escalates to a model
+call. So does every numeric value against a range dropdown ("4" against
+"3-5 years"). Both are common.
+
+**If you change this,** the test named `does NOT select West Virginia for an
+applicant in Virginia` is the one that must keep passing. It is named after the
+bug, not after the function.
 
 ---
 
-## 7. The free-response / voice subsystem is designed only to Section 1
+## 4. The guard that actually holds is not the obvious one
 
-Design decided in conversation on 2026-08-31, **not yet written to a spec** and
-not implemented. What was settled:
+A **finding**, not a gap, but the most load-bearing thing on this page.
+
+On the semantic route, what stops a work-authorization question from autofilling
+is the **confidence cap** (`sourceScores.semantic` = 0.80, below
+`autofillThreshold` = 0.95) — **not** `requiresVerifiedValue`. The
+sensitive-path gate deliberately permits a value the user typed themselves,
+which is the whole point of storing one.
+
+Verified by mutation: raising `sourceScores.semantic` to 0.99 turns all four
+sensitive-field tests in `tests/semantic/safety.test.ts` into autofills.
+
+**So:** that number is a safety control, not a tuning knob. Raising it to
+"improve coverage" would silently make the extension answer legal questions on
+someone's behalf. `tests/semantic/safety.test.ts` says this in as many words and
+pins the number directly.
+
+---
+
+## 5. Smaller gaps
+
+- **Cache eviction is oldest-first, not LRU.** LRU needs a write on every read,
+  and the cache is read on the hot path of every scan — which would turn a free
+  cache hit into a storage write. At the 500-entry cap the difference is
+  theoretical, but a user who meets 500 novel questions starts paying again for
+  their oldest ones.
+- **A cached concept is never re-examined.** If a model's answer was wrong, the
+  user corrects the field once and the existing learned-mapping path takes over
+  at higher confidence — but the wrong cached entry stays. `SemanticConceptCache`
+  has `clear()`; no UI calls it.
+- **Nothing shows the quota on a successful scan.** The panel is silent unless
+  the fallback failed, which is deliberate — a panel that narrates its own
+  internals every scan is one the user stops reading. But "how much of my daily
+  budget did this form cost" is unanswerable from the UI.
+- **`applyUpdates` is covered by no test at all.** The reasoning moved into
+  `@semantic/apply.ts` precisely so it could be tested, but the translation into
+  `ResolvedFieldAction` and `PendingFieldAudit` stayed in `background.ts`, which
+  has no unit test and is not reached by `e2e/fill.spec.ts`. It writes the
+  action and the history row together — if those two ever disagree, nothing
+  currently fails.
+
+---
+
+## 6. The free-response subsystem is designed only to its first section
+
+Decided in conversation on 2026-08-31. **Not written to a spec, not
+implemented.** Recorded here because the decisions are the expensive part and
+they currently exist only in a transcript.
+
+What was settled:
 
 - **Capture on fill, plus import.** Praedos captures a free-response answer when
-  it is active on the page, plus a one-time import of past cover letters. Stays
-  on `activeTab` — no permission change, no always-on content script.
+  it is already active on the page, plus a one-time import of past cover
+  letters. Stays on `activeTab` — no always-on content script, no new
+  permission. Always-on passive capture was considered and rejected: it needs
+  the broad host permission `wxt.config.ts` deliberately avoids.
 - **Reuse verbatim, draft the rest.** Portable questions ("describe a hard
-  problem you solved") refill with the user's exact past words — no model
+  problem you solved") refill with the user's exact past words, with no model
   involved. Company-specific questions ("why us") produce a draft.
 - **Compose only from the user's own material.** The drafting step may assemble
   and adapt what the user has actually written; anything it cannot ground in a
-  stored specific comes back as a *gap to fill*, never as invented prose.
-- A verbatim reuse may autofill. A composed draft **never** autofills — enforced
-  by separate types, not by a threshold.
+  stored specific comes back as a **gap to fill**, never as invented prose. This
+  is the refusal architecture applied to writing.
+- **A verbatim reuse may autofill; a composed draft never may** — enforced by
+  separate types, not by a threshold.
 
-**Still undesigned:** data flow, cold start (what happens on application #1 with
-an empty corpus), the portable-vs-company-specific classifier, storage shape,
-and testing. Section 1 (module boundaries) was presented and is awaiting
-approval.
+Two stores are implied and should not be collapsed: the user's **answers**
+verbatim (the retrieval corpus and the voice sample set) and the **specifics**
+extracted from them, each carrying a provenance pointer. That pointer is the
+anti-slop mechanism — a sentence may only be emitted if a specific backs it.
 
-**Why it matters:** this is the differentiator. Simplify and Jobright produce
-generic AI prose; the anti-slop mechanism here is that output is provably made
-of the user's own sentences and specifics.
+**Still undesigned:** data flow, cold start on application #1 with an empty
+corpus, the portable-vs-company-specific classifier, storage shape, testing.
+
+**Why it matters:** this is the differentiator. Competitors produce generic AI
+prose; the claim here is that output is provably made of the user's own
+sentences. That claim is only worth making if the grounding is real.
 
 ---
 
-## 8. Surfaces that are entirely unimplemented
+## 7. Surfaces nobody has implemented — here or anywhere
 
-From the competitive research on 2026-08-31 — no open-source tool examined
-implements any of these either, which is why they are the opportunity as well as
-the gap:
+From competitive research on 2026-08-31. No open-source tool examined implements
+any of these either, which makes them the opportunity as much as the gap.
 
 | Surface | State |
 |---|---|
-| Workday multi-step wizard | Not started (Phase 7). Per-step validation gating, and dropdown option order **varies per question**, so positional clicking can select "No" on work authorization |
+| Workday multi-step wizard | Not started (Phase 7). Per-step validation gating |
 | Account creation | Not started. Workday requires signup before applying |
 | Shadow DOM traversal | Not implemented anywhere in the codebase |
 | Cross-origin iframes | Not implemented. Some enterprise ATS embeds use them |
-| iCIMS, Taleo, SmartRecruiters, SuccessFactors | No detector, no fixtures, no adapters |
-| Anti-bot / CAPTCHA | Not addressed at all — see gap #9 |
+| iCIMS, Taleo, SmartRecruiters, SuccessFactors | No detector, fixtures or adapters |
 
-Two findings worth carrying into Phase 7 when it starts:
+Three findings worth carrying into Phase 7 rather than rediscovering:
 
-- **Lever fires hCaptcha on programmatic checkbox/radio clicks.** A working
+- **Workday dropdown option order varies per question**, so a positional click
+  can select "No" on *are you authorized to work?*. Type-ahead and verify the
+  highlight; never select by index. This is the same class of failure as the
+  index-vs-label rule already enforced in `semantic/option-match.ts`.
+- **Lever fires hCaptcha on programmatic checkbox and radio clicks.** A working
   approach elsewhere is to fill text, textarea and native selects only, and list
-  the skipped controls for the user to tick.
+  the skipped controls for the user to tick by hand.
 - **SuccessFactors-family portals can silently diverge** — an uploaded resume is
-  parsed once and not reliably re-parsed, so the stored profile drifts from the
-  file with no error shown. If a portal offers a "review your profile" step,
-  surface it as a required check.
+  parsed once and not reliably re-parsed, so the portal's stored profile drifts
+  from the file with no error shown. Where a portal offers a "review your
+  profile" step, surface it as a required check rather than confirming upload
+  success.
 
 ---
 
-## 9. Anti-bot exposure has never been assessed
+## 8. Anti-bot exposure has never been assessed
 
 Synthetic mouse events, native-setter writes and programmatic `DataTransfer`
-file injection are precisely the fingerprint bot-detection systems look for.
-No source consulted addressed CAPTCHA, Cloudflare/PerimeterX, request pacing or
+file injection are precisely the fingerprint bot-detection systems look for. No
+source consulted addressed CAPTCHA, Cloudflare/PerimeterX, request pacing, or
 ATS terms-of-service exposure.
 
-Recorded as an unexamined risk sitting under the whole product, not as a task.
-It should be decided deliberately rather than discovered in production.
+Recorded as an unexamined risk under the whole product, not as a task. It should
+be decided deliberately rather than discovered in production. Gap #1 is the
+first place it will surface.
 
 ---
 
-## 10. Process gap: parallel agents duplicated work
+## 9. Process: parallel agents duplicated a whole subsystem
 
-On 2026-08-31 a subagent was dispatched to implement steps 1–4 of
+On 2026-08-31 a subagent was dispatched to implement §9 steps 1–4 of
 `SEMANTIC_FILL_BRIEF.md` in a worktree while the full seven-step implementation
-was already landing on `main`. The branch conflicted add/add on every file and
-was discarded. Nothing was lost but the time.
+was already landing on `main` from another session. The branch conflicted
+add/add on every file and was discarded. Separately, this file was overwritten
+rather than merged, and recovered from `c95f05c`.
 
-**To avoid:** check `git log main` immediately before dispatching an agent
-against a written brief, and again before merging its branch.
+**To avoid:** read `git log main` immediately before dispatching an agent
+against a written brief and again before merging its branch — and read any file
+before writing over it, however new it looks.
 
 ---
 
-## Not gaps — decided, do not re-open
+## What is NOT a gap
 
-- **No similarity tier in the option scorer.** See gap #3.
-- **The concept cache is a separate store**, not an extension of
-  `LearnedMappingStore`. `userConfirmed` carries the user's authority and a
-  model's guess must not inherit it.
-- **A semantic mapping cannot autofill.** `sourceScores.semantic` (0.80) sits
-  below `autofillThreshold` (0.95) by design. On this route the confidence cap,
-  **not** `requiresVerifiedValue`, is what stops a work-authorization question
-  from autofilling — a mutation check confirmed it. If either number moves, run
-  `tests/semantic/safety.test.ts` and read what it says first.
+Recorded so these are not re-litigated:
+
+- **Workday.** Out of scope by decision #3 of the brief. The option-matching
+  engine was the risky new part and it was proven where the DOM is easy.
+- **Free-text answer generation** (spec Phase 8's later half). Approving,
+  editing and reusing written answers is not built. `prompt.md` §27 is explicit
+  that open-ended answers must not be fabricated, and nothing here does.
+- **The extension asking for host permissions.** It does not, and did not start
+  to. The built manifest still declares no `host_permissions`; `connect-src` is
+  pinned to the compiled-in origin and nothing else.
