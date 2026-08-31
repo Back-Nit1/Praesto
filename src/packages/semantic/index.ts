@@ -16,8 +16,22 @@
  *     3. resolveValue(...)                 EXISTING, unchanged
  *     4. chooseOption({...})               scorer, then at most one call
  *     5. decideFill(...)                   EXISTING, unchanged - the safety gate
+ *
+ * `applySemanticFallback` IS that sequence, and callers should use it rather
+ * than reassembling the steps. It used to be assembled at the call site, and
+ * the fixture test had a second copy - two implementations of an ordering is
+ * one more than the number that can be right. The pieces stay exported because
+ * each is independently testable, not because a caller should chain them.
  */
 export { collectRefusals, type FieldOutcome } from './queue';
+export {
+  applySemanticFallback,
+  summariseRun,
+  type SemanticApplyInput,
+  type SemanticApplyOutcome,
+  type SemanticFieldUpdate,
+  type SemanticRunSummary,
+} from './apply';
 export { resolveConcepts, type ConceptStageInput, type ConceptStageOutcome } from './concept';
 export {
   matchOption,

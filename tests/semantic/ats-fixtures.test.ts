@@ -22,13 +22,7 @@ import { scanPage } from '@form-engine/detector/scanner';
 import { mapField } from '@form-engine/mapper/mapper';
 import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
-import {
-  chooseOption,
-  collectRefusals,
-  resolveConcepts,
-  SemanticConceptCache,
-  type FieldOutcome,
-} from '@semantic/index';
+import { applySemanticFallback, SemanticConceptCache, type FieldOutcome } from '@semantic/index';
 import { createEmptyProfile, userValue, type ApplicantProfile } from '@profile/schema';
 import { InMemoryStore } from '@storage/key-value-store';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
@@ -124,68 +118,24 @@ async function apply(
   }
 
   // --- the semantic fallback, on the refusals only --------------------------
-  const refusals = collectRefusals(outcomes);
-  const descriptors = new Map(refusals.map((field) => [field.fieldId, field.descriptor]));
-  let modelCalls = 0;
+  //
+  // The SAME function the service worker calls. Reassembling the steps here
+  // would only prove that this file agrees with itself.
+  const semantic = await applySemanticFallback({ profile, outcomes, port, cache });
 
-  const stage1 = await resolveConcepts({ fields: refusals, port, cache });
-  modelCalls += stage1.modelCalls;
-
-  for (const concept of stage1.resolutions) {
-    const descriptor = descriptors.get(concept.fieldId);
-    if (descriptor === undefined) continue;
-
-    const resolution = resolveValue(profile, concept.profilePath, descriptor);
-    if (!resolution.ok) continue;
-
-    const decision = decideFill({
-      mappingConfidence: concept.confidence,
-      valueConfidence: resolution.resolved.confidence,
-      valueVerifiedByUser: resolution.resolved.verifiedByUser,
-      profilePath: concept.profilePath,
-      valueMissing: false,
-      controlHasValue: (descriptor.currentValue ?? '').length > 0,
+  for (const update of semantic.updates) {
+    const report = reports.get(update.localId);
+    if (report === undefined) continue;
+    reports.set(update.localId, {
+      ...report,
+      decision: update.action === 'fill' ? 'autofill' : 'suggest',
+      path: update.profilePath,
+      value: update.value,
+      viaSemantic: true,
     });
-    if (decision === 'skip') continue;
-
-    const report = reports.get(concept.fieldId);
-    if (report !== undefined) {
-      reports.set(concept.fieldId, {
-        ...report,
-        decision,
-        path: concept.profilePath,
-        value: resolution.resolved.value,
-        viaSemantic: true,
-      });
-    }
   }
 
-  for (const field of refusals) {
-    if (field.kind !== 'no_matching_option' || field.profilePath === null) continue;
-
-    const { options: _drop, ...withoutOptions } = field.descriptor;
-    const asText = resolveValue(profile, field.profilePath, withoutOptions);
-    if (!asText.ok || typeof asText.resolved.value !== 'string') continue;
-
-    const chosen = await chooseOption({
-      fieldId: field.fieldId,
-      value: asText.resolved.value,
-      options: field.descriptor.options ?? [],
-      port,
-    });
-    modelCalls += chosen.modelCalls;
-    if (chosen.option === null) continue;
-
-    const report = reports.get(field.fieldId);
-    if (report !== undefined) {
-      reports.set(field.fieldId, {
-        ...report,
-        decision: 'suggest',
-        value: chosen.option.value,
-        viaSemantic: true,
-      });
-    }
-  }
+  const modelCalls = semantic.modelCalls;
 
   return { fields: [...reports.values()], modelCalls };
 }

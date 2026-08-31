@@ -311,6 +311,39 @@ export const pongResponseSchema = z.object({
   storageReady: z.boolean(),
 });
 
+/**
+ * What the semantic fallback cost and whether it failed.
+ *
+ * ABSENT ON MOST SCANS, and its absence is meaningful: a form the deterministic
+ * pipeline understood produces no refusals, so the subsystem does not run and
+ * there is nothing to report.
+ *
+ * NOTE WHAT IS NOT IN HERE: no field ids, no labels, no values. It answers "did
+ * this cost anything, did it fail, and how much is left" - never what the
+ * applicant was asked or what they would have said. The panel needs the
+ * difference between "nothing matched" and "you are out of AI answers until
+ * tomorrow", because only the second is something a user can act on; it does
+ * not need anything else.
+ */
+export const semanticRunSummarySchema = z.object({
+  modelCalls: z.number().int().nonnegative(),
+  error: z
+    .object({
+      code: z.string().max(64),
+      message: z.string().max(200),
+      /** Present on RATE_LIMITED. The actionable part of that failure. */
+      retryAfterMs: z.number().nonnegative().optional(),
+    })
+    .optional(),
+  quota: z
+    .object({
+      used: z.number().int().nonnegative(),
+      limit: z.number().int().nonnegative(),
+      resetsInMs: z.number().nonnegative(),
+    })
+    .optional(),
+});
+
 export const resolveApplicationFieldsResponseSchema = z.object({
   ok: z.literal(true),
   type: z.literal('RESOLVE_APPLICATION_FIELDS_RESULT'),
@@ -322,6 +355,8 @@ export const resolveApplicationFieldsResponseSchema = z.object({
     needsReview: z.number().int(),
     unknown: z.number().int(),
   }),
+  /** Absent when the semantic fallback did not run. See the schema above. */
+  semantic: semanticRunSummarySchema.optional(),
 });
 
 export const genericOkResponseSchema = z.object({
