@@ -35,6 +35,7 @@ import {
   MESSAGE_PROTOCOL_VERSION,
   parseRequest,
   type ExtensionResponse,
+  type ReportFillResultsRequest,
   type ResolveApplicationFieldsRequest,
   type ResolvedFieldAction,
 } from '@shared/messages';
@@ -44,6 +45,11 @@ import { StoredProfileRepository } from '@profile/repository';
 import { isProfilePath, labelForPath, parseCollectionPath } from '@profile/paths';
 import { currentEmploymentIndex, mostRecentEducationIndex } from '@profile/selectors';
 import { LearnedMappingStore, type LearnedMappingIndex } from '@learning/mapping-memory';
+import { AuditRepository } from '@audit/repository';
+import { buildAuditRecords, buildUnmatchedRecords, type FillResultInput } from '@audit/join';
+import { PendingRunStore, pendingKey, type PendingFieldAudit } from '@audit/pending';
+import { canonicalUrl } from '@audit/types';
+import { newId } from '@shared/ids';
 import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
 import { mapField, type CollectionEntryIndexes } from '@form-engine/mapper/mapper';
 import { isResumeField } from '@form-engine/mapper/resume-field';
@@ -81,6 +87,21 @@ export default defineBackground(() => {
   const store = new ChromeLocalStore();
   const profileRepository = new StoredProfileRepository(store);
   const learnedMappings = new LearnedMappingStore(store);
+
+  /**
+   * Application history (spec section 24).
+   *
+   * Two stores because the data has two lifetimes. `pendingRuns` holds the
+   * mapping metadata of a scan in session storage until the fill results that
+   * complete it arrive - minutes, and never written to disk. `auditHistory`
+   * holds the finished rows in IndexedDB - months, and pruned by policy.
+   *
+   * NEITHER MAY EVER FAIL A FILL. History is a convenience; a fill that worked
+   * must never be reported as failed because a history write did. Every use
+   * below logs and continues.
+   */
+  const pendingRuns = new PendingRunStore();
+  const auditHistory = new AuditRepository();
 
   /**
    * Storage readiness, tracked per worker instance.
@@ -188,7 +209,9 @@ export default defineBackground(() => {
       return false;
     }
 
-    handleMessage(raw)
+    // The tab id is part of how a fill result finds its scan - see
+    // audit/pending.ts on why a URL alone is not enough on a careers site.
+    handleMessage(raw, sender.tab?.id)
       .then(sendResponse)
       .catch((error: unknown) => {
         // Nothing may escape this listener. An unhandled rejection here takes the
@@ -200,7 +223,10 @@ export default defineBackground(() => {
     return true;
   });
 
-  async function handleMessage(raw: unknown): Promise<ExtensionResponse> {
+  async function handleMessage(
+    raw: unknown,
+    senderTabId: number | undefined,
+  ): Promise<ExtensionResponse> {
     // TRUST BOUNDARY. Everything past this line has a validated shape.
     const parsed = parseRequest(raw);
     if (!parsed.ok) {
@@ -221,7 +247,7 @@ export default defineBackground(() => {
         };
 
       case 'RESOLVE_APPLICATION_FIELDS':
-        return resolveFields(request);
+        return resolveFields(request, senderTabId);
 
       case 'REPORT_FILL_RESULTS': {
         // A verified fill the user did not change is evidence the rule behind
@@ -239,6 +265,8 @@ export default defineBackground(() => {
         log.debugLazy(() => [
           `Fill results: ${request.results.filter((r) => r.verified).length}/${request.results.length} verified`,
         ]);
+
+        await recordHistory(request, senderTabId);
         return { ok: true, type: 'OK' };
       }
 
@@ -291,6 +319,14 @@ export default defineBackground(() => {
 
         if (!recorded.ok) return errorResponse(recorded.error.code, recorded.error.message);
 
+        // Mark the history rows this field already produced. A correction says
+        // the mapping was wrong, and it was wrong every time it was used - so
+        // the history should not go on showing those fills as unremarkable
+        // successes. Keyed by the `exact` fingerprint, the same one the row
+        // was written with.
+        const marked = await auditHistory.markCorrected(fingerprints.exact);
+        if (!marked.ok) log.warn('Could not mark history rows corrected', marked.error.code);
+
         log.info(`Correction stored: ${request.profilePath ?? 'none'} at scope ${request.scope}`);
         return { ok: true, type: 'OK' };
       }
@@ -309,6 +345,7 @@ export default defineBackground(() => {
    */
   async function resolveFields(
     request: ResolveApplicationFieldsRequest,
+    senderTabId: number | undefined,
   ): Promise<ExtensionResponse> {
     if (!(await storageReady)) {
       return errorResponse('MIGRATION_FAILED', 'Stored data could not be prepared');
@@ -351,6 +388,14 @@ export default defineBackground(() => {
     };
 
     const actions: ResolvedFieldAction[] = [];
+    /**
+     * What we knew about each field, for the history row it will produce.
+     *
+     * Collected here and stashed below rather than sent to the page: the
+     * cascade stage that produced a mapping is our reasoning, and the page has
+     * no business knowing it (see the data-minimisation note in messages.ts).
+     */
+    const auditFields: PendingFieldAudit[] = [];
     let readyToFill = 0;
     let needsReview = 0;
     let unknown = 0;
@@ -359,7 +404,14 @@ export default defineBackground(() => {
       // A failure on one field must never abort the batch. A single unusual
       // control should cost that control, not the other nineteen on the page.
       try {
-        actions.push(resolveOneField(profile, descriptor as FieldDescriptor, learned, entryIndexes));
+        const resolved = resolveOneField(
+          profile,
+          descriptor as FieldDescriptor,
+          learned,
+          entryIndexes,
+        );
+        actions.push(resolved.action);
+        auditFields.push(resolved.audit);
       } catch (error) {
         log.warn('Field resolution failed', descriptor.localId, toAppError(error).message);
         actions.push({
@@ -370,8 +422,19 @@ export default defineBackground(() => {
           knowledgeState: 'unknown',
           explanation: 'Could not be processed',
         });
+        // A field that threw still gets a history row, saying exactly that: it
+        // was seen, and nothing was decided about it.
+        auditFields.push({
+          localId: descriptor.localId,
+          fieldFingerprint: '',
+          mappingConfidence: 0,
+          mappingSource: 'none',
+          decidedAction: 'skip',
+        });
       }
     }
+
+    await stashScan(request, senderTabId, auditFields);
 
     for (const action of actions) {
       if (action.action === 'fill' || action.action === 'attach_resume') readyToFill++;
@@ -387,27 +450,55 @@ export default defineBackground(() => {
     };
   }
 
-  /** One field through the pipeline. Extracted so the loop above stays readable. */
+  /**
+   * One field through the pipeline. Extracted so the loop above stays readable.
+   *
+   * Returns the action AND the audit metadata, because the two are produced by
+   * the same reasoning and separating them would mean running the mapper twice
+   * - and a second run against a changed profile or rule set could disagree
+   * with the first, so history would describe a decision that was never made.
+   */
   function resolveOneField(
     profile: Parameters<typeof resolveValue>[0],
     descriptor: FieldDescriptor,
     learned: LearnedMappingIndex,
     entryIndexes: CollectionEntryIndexes,
-  ): ResolvedFieldAction {
+  ): { action: ResolvedFieldAction; audit: PendingFieldAudit } {
+    // The `exact` scope, which is what a correction is keyed by - so a history
+    // row and the rule the user later writes about it agree on the field.
+    const fingerprint = computeFingerprints(descriptor).exact;
+    const detectedLabel = selectQuestionText(descriptor);
+
+    /** The audit half, filled in from whatever the branch below knew. */
+    const auditFor = (
+      fields: Omit<PendingFieldAudit, 'localId' | 'fieldFingerprint' | 'detectedLabel'>,
+    ): PendingFieldAudit => ({
+      localId: descriptor.localId,
+      fieldFingerprint: fingerprint,
+      ...(detectedLabel.length > 0 ? { detectedLabel } : {}),
+      ...fields,
+    });
     // 0. A resume upload is not a profile value, so it is decided before the
     //    mapping cascade runs. It has no canonical path and a different
     //    adapter drives it - see form-engine/mapper/resume-field.ts for why
     //    the matcher is deliberately narrow.
     if (isResumeField(descriptor)) {
       const alreadyAttached = (descriptor.currentValue ?? '').trim().length > 0;
+      const action = alreadyAttached ? ('skip' as const) : ('attach_resume' as const);
       return {
-        localId: descriptor.localId,
-        action: alreadyAttached ? 'skip' : 'attach_resume',
-        profilePath: null,
-        mappingConfidence: 0.95,
-        knowledgeState: 'known',
-        controlKind: descriptor.kind,
-        explanation: alreadyAttached ? 'A file is already attached' : 'Resume upload',
+        action: {
+          localId: descriptor.localId,
+          action,
+          profilePath: null,
+          mappingConfidence: 0.95,
+          knowledgeState: 'known',
+          controlKind: descriptor.kind,
+          explanation: alreadyAttached ? 'A file is already attached' : 'Resume upload',
+        },
+        // No mapping ran, so none is claimed. `decidedAction` carries the
+        // meaning here: a resume is a document, not a profile value, and
+        // recording a mapping source for it would be inventing one.
+        audit: auditFor({ mappingConfidence: 0, mappingSource: 'none', decidedAction: action }),
       };
     }
 
@@ -417,12 +508,18 @@ export default defineBackground(() => {
 
     if (mapping.profilePath === null) {
       return {
-        localId: descriptor.localId,
-        action: 'skip',
-        profilePath: null,
-        mappingConfidence: 0,
-        knowledgeState: 'unknown',
-        explanation: 'Not recognised',
+        action: {
+          localId: descriptor.localId,
+          action: 'skip',
+          profilePath: null,
+          mappingConfidence: 0,
+          knowledgeState: 'unknown',
+          explanation: 'Not recognised',
+        },
+        // The most valuable row in the history: a question the user had to
+        // answer by hand, recorded with the text the form used, which is
+        // exactly what a future alias or correction has to match.
+        audit: auditFor({ mappingConfidence: 0, mappingSource: mapping.source, decidedAction: 'skip' }),
       };
     }
 
@@ -439,16 +536,34 @@ export default defineBackground(() => {
       controlKind: descriptor.kind,
     };
 
+    /** The audit half for a field the cascade did understand. */
+    const mappedAudit = (decidedAction: PendingFieldAudit['decidedAction']): PendingFieldAudit =>
+      auditFor({
+        // Spread conditionally rather than assigning `undefined`:
+        // `exactOptionalPropertyTypes` treats an explicit undefined as a
+        // different thing from an absent key, and so does structured clone.
+        ...(mapping.profilePath !== null ? { mappedProfilePath: mapping.profilePath } : {}),
+        mappingConfidence: mapping.confidence,
+        mappingSource: mapping.source,
+        decidedAction,
+      });
+
     if (!resolution.ok) {
       return {
-        ...base,
-        action: 'skip',
-        explanation:
-          resolution.reason === 'no_entry'
-            ? missingEntryExplanation(mapping.profilePath)
-            : resolution.reason === 'no_value'
-              ? `Your profile has no ${labelForPath(mapping.profilePath).toLowerCase()}`
-              : 'No value could be formatted for this control',
+        action: {
+          ...base,
+          action: 'skip',
+          explanation:
+            resolution.reason === 'no_entry'
+              ? missingEntryExplanation(mapping.profilePath)
+              : resolution.reason === 'no_value'
+                ? `Your profile has no ${labelForPath(mapping.profilePath).toLowerCase()}`
+                : 'No value could be formatted for this control',
+        },
+        // Understood, and deliberately not filled. History distinguishes this
+        // from 'not recognised': one is a gap in the profile, the other a gap
+        // in the mapping, and they need different fixes.
+        audit: mappedAudit('skip'),
       };
     }
 
@@ -464,18 +579,117 @@ export default defineBackground(() => {
     });
 
     if (decision === 'skip') {
-      return { ...base, action: 'skip', explanation: explainSkip(descriptor) };
+      return {
+        action: { ...base, action: 'skip', explanation: explainSkip(descriptor) },
+        audit: mappedAudit('skip'),
+      };
     }
 
     const optionValue = resolution.resolved.option?.value;
+    const decided = decision === 'autofill' ? ('fill' as const) : ('suggest' as const);
 
     return {
-      ...base,
-      action: decision === 'autofill' ? 'fill' : 'suggest',
-      value: resolution.resolved.value,
-      ...(optionValue !== undefined ? { optionValue } : {}),
-      explanation: `${labelForPath(mapping.profilePath)} (${mapping.reasons[0]?.signal ?? 'mapped'})`,
+      action: {
+        ...base,
+        action: decided,
+        value: resolution.resolved.value,
+        ...(optionValue !== undefined ? { optionValue } : {}),
+        explanation: `${labelForPath(mapping.profilePath)} (${mapping.reasons[0]?.signal ?? 'mapped'})`,
+      },
+      // NOTE what does not travel into the audit: `resolution.resolved.value`.
+      // The applicant's answer stops here, at the boundary between deciding and
+      // remembering. See audit/types.ts.
+      audit: mappedAudit(decided),
     };
+  }
+
+  /**
+   * Remember what a scan decided, so the fill report can be joined to it.
+   *
+   * Awaited rather than fired and forgotten: the fill report can follow within
+   * milliseconds on a fast machine, and a stash that lands second would be
+   * read as absent - producing history rows with no labels, intermittently,
+   * which is the hardest kind of bug to see in a product like this.
+   *
+   * A failure is logged and swallowed. Losing history is a small harm; failing
+   * a scan because history could not be written is a large one.
+   */
+  async function stashScan(
+    request: ResolveApplicationFieldsRequest,
+    senderTabId: number | undefined,
+    fields: PendingFieldAudit[],
+  ): Promise<void> {
+    const pageUrl = canonicalUrl(request.page.url);
+    const stashed = await pendingRuns.stash(pendingKey(senderTabId, pageUrl), {
+      runId: newId(),
+      createdAt: Date.now(),
+      pageUrl,
+      hostname: request.page.hostname,
+      ats: request.page.ats,
+      fields,
+    });
+
+    if (!stashed.ok) log.warn('Could not stash the scan for history', stashed.error.code);
+  }
+
+  /**
+   * Write the history rows for a fill.
+   *
+   * The join key is the tab plus the canonical URL, matching what `stashScan`
+   * wrote. When there is no stash - it expired, or the browser was restarted
+   * between the scan and the fill - the rows are still written, from the report
+   * alone, and say plainly that the reasoning behind them is no longer known.
+   *
+   * One note on the orphan path: the ATS kind there comes from the report,
+   * where the scanner currently sends a literal `unknown` rather than the
+   * detected value. Rows joined to a stash carry the real kind, which is the
+   * overwhelming majority; fixing the report's page context is a separate
+   * change to the content script's message.
+   */
+  async function recordHistory(
+    request: ReportFillResultsRequest,
+    senderTabId: number | undefined,
+  ): Promise<void> {
+    const pageUrl = canonicalUrl(request.page.url);
+    const now = new Date();
+
+    const results: FillResultInput[] = request.results.map((result) => ({
+      localId: result.localId,
+      attempted: result.attempted,
+      verified: result.verified,
+      ...(result.adapter !== undefined ? { adapter: result.adapter } : {}),
+      ...(result.failureReason !== undefined ? { failureReason: result.failureReason } : {}),
+    }));
+
+    const pending = await pendingRuns.get(pendingKey(senderTabId, pageUrl));
+    const records =
+      pending.ok && pending.value !== undefined
+        ? buildAuditRecords(pending.value, results, now)
+        : buildUnmatchedRecords(
+            {
+              runId: newId(),
+              pageUrl,
+              hostname: request.page.hostname,
+              ats: request.page.ats,
+            },
+            results,
+            now,
+          );
+
+    const written = await auditHistory.record(records);
+    if (!written.ok) {
+      // Deliberately not returned to the caller. The fill happened; reporting
+      // it as failed because the history write failed would be a lie in the
+      // one direction this product must never lie.
+      log.warn('Could not write application history', written.error.code);
+      return;
+    }
+
+    // Pruned where the growth happens, so the store is never more than one run
+    // over its limit and no background alarm has to wake this worker.
+    const pruned = await auditHistory.prune(now);
+    if (!pruned.ok) log.warn('Could not prune application history', pruned.error.code);
+    else if (pruned.value > 0) log.debugLazy(() => [`Pruned ${pruned.value} history rows`]);
   }
 
   /**
