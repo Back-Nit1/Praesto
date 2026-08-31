@@ -80,8 +80,10 @@ export function LearnedRules(): ReactNode {
     return (
       <div className="surface-card grid min-h-48 place-items-center p-8 text-center">
         <div>
-          <div className="scan-orbit !my-0 !mb-3 !h-12 !w-12" aria-hidden="true" />
-          <p className="text-sm text-[var(--ink-2)]">Opening personal memory…</p>
+          <div className="scan-lines" aria-hidden="true">
+            <span /><span /><span /><span />
+          </div>
+          <p className="text-sm text-[var(--ink-2)]">Loading your rules…</p>
         </div>
       </div>
     );

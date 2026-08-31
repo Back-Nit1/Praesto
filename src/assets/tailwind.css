@@ -149,473 +149,495 @@
   }
 }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-  color: inherit;
-}
-
-button,
-label[for],
-select {
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Every count, every applicant value. Tabular so a column of numbers lines up
-   and a changing count does not make the row jump. */
-.data {
-  font-family: var(--font-data);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-
-/* One focus treatment, everywhere, in ink. Visible on both grounds without
-   spending a colour that is supposed to mean something else. */
-:where(button, a, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
-
-::selection {
-  background: color-mix(in srgb, var(--ink) 18%, transparent);
-}
-
-/* The mark: one cell filled, one cell deliberately left empty.
-   That is the entire product in two squares - it answers what it knows and
-   leaves the rest blank rather than guessing - and it stays legible at 16 px
-   because it is two rectangles and a hairline. */
-.brand-mark {
-  position: relative;
-  display: inline-grid;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 3px;
-  border: 1.5px solid var(--ink);
-  border-radius: 7px;
-}
-
-.brand-mark::before,
-.brand-mark::after {
-  content: "";
-  border-radius: 1.5px;
-}
-
-.brand-mark::before {
-  background: var(--ink);
-}
-
-.brand-mark::after {
-  border: 1.5px solid var(--ink);
-  opacity: 0.32;
-}
-
-.brand-mark--small {
-  width: 22px;
-  height: 22px;
-  padding: 2.5px;
-  border-radius: 6px;
-}
-
-/* Surfaces --------------------------------------------------------------- */
-.surface-card {
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: var(--lift-soft);
-}
-
-/* Options workspace ------------------------------------------------------- */
-.options-shell {
-  min-height: 100vh;
-  background: var(--ground);
-}
-
-.options-layout {
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  min-height: 100vh;
-}
-
-.options-sidebar {
-  position: sticky;
-  top: 0;
-  display: flex;
-  height: 100vh;
-  flex-direction: column;
-  padding: 22px 16px 18px;
-  border-right: 1px solid var(--rule);
-  background: var(--paper);
-}
-
-.options-main {
-  min-width: 0;
-  padding: 30px clamp(22px, 4vw, 56px) 80px;
-}
-
-.options-workspace {
-  width: min(1060px, 100%);
-  margin: 0 auto;
-}
-
-.workspace-topbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  padding-bottom: 18px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.workspace-title {
-  margin: 0;
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
-}
-
-.workspace-subtitle {
-  max-width: 62ch;
-  margin: 7px 0 0;
-  color: var(--ink-2);
-  font-size: 13.5px;
-  line-height: 1.6;
-}
-
-.workspace-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* Sections declare their own width. The previous rule selected them by
-   nth-child, so inserting one section silently re-laid out every section after
-   it - and left "Skills" alone in a half-width column beside a hole. */
-.profile-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 16px;
-}
-
-.profile-section {
-  position: relative;
-  margin: 0;
-  padding: 18px;
-}
-
-.profile-section--wide {
-  grid-column: 1 / -1;
-}
-
-.section-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.section-title {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 620;
-  letter-spacing: -0.005em;
-}
-
-/* Side panel -------------------------------------------------------------- */
-.panel-shell {
-  min-height: 100vh;
-  padding: 14px 14px 28px;
-  background: var(--ground);
-  color: var(--ink);
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.panel-product-name {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 620;
-  letter-spacing: -0.015em;
-}
-
-.panel-icon-button {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink-2);
-  transition: color 120ms ease, border-color 120ms ease;
-}
-
-.panel-icon-button:hover {
-  border-color: var(--rule-2);
-  color: var(--ink);
-}
-
-.panel-card {
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: var(--lift-soft);
-}
-
 /* ---------------------------------------------------------------------------
-   THE CERTAINTY LEDGER - the signature of this interface.
+   CASCADE LAYERS ARE NOT OPTIONAL HERE.
 
-   One bar, segmented in proportion to what the scan actually found. It
-   replaced a grid of four to six equal metric cards, which gave "fields
-   detected" - a number nobody acts on - the same weight as "needs your
-   review", the only number that is a to-do list. Worse, the grid grew from
-   four cards to six after a fill and shifted everything below it.
-
-   A single proportional bar cannot flatter the result. If the extension
-   understood four fields out of nineteen, the grey runs three quarters of the
-   width and you see that before you read a word. A product whose promise is
-   "it will admit what it does not know" should show ignorance at full size.
+   `@import 'tailwindcss'` places every utility in the `utilities` layer, and
+   an UNLAYERED rule beats a layered one regardless of specificity. While the
+   rules below sat outside a layer, a one-word reset - `button { color:
+   inherit }` - silently defeated `text-[var(--on-action)]` on every button in
+   the product, and the primary action rendered as a white slab with no
+   readable label. Declaring the layers restores the order you would expect:
+   utilities override components, components override base.
    --------------------------------------------------------------------------- */
-.ledger {
-  display: flex;
-  gap: 2px;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-}
-
-.ledger-seg {
-  min-width: 3px;
-  border-radius: 999px;
-  transform-origin: left center;
-  animation: ledger-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.ledger-seg--verified { background: var(--s-verified); }
-.ledger-seg--confident { background: var(--s-confident); }
-.ledger-seg--review { background: var(--s-review); }
-.ledger-seg--unknown { background: var(--s-unknown); opacity: 0.34; }
-
-@keyframes ledger-in {
-  from { transform: scaleX(0); }
-}
-
-.ledger-key {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 12px;
-}
-
-.ledger-key-item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--ink-2);
-}
-
-.ledger-key-dot {
-  width: 6px;
-  height: 6px;
-  align-self: center;
-  flex: 0 0 auto;
-  border-radius: 999px;
-}
-
-.ledger-count {
-  font-family: var(--font-data);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-/* Field rows -------------------------------------------------------------- */
-
-/* The state rail. Reading down the list, the left edge is a stripe whose
-   colour composition IS the trust profile of the application - the same
-   information as the ledger, at the point where you act on it. */
-.field-row {
-  position: relative;
-  padding: 11px 12px 11px 20px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.field-row:last-child {
-  border-bottom: 0;
-}
-
-.field-row::before {
-  position: absolute;
-  top: 11px;
-  bottom: 11px;
-  left: 10px;
-  width: 2px;
-  content: "";
-  border-radius: 999px;
-  background: var(--rail, var(--s-unknown));
-}
-
-.field-row--verified { --rail: var(--s-verified); }
-.field-row--high_confidence { --rail: var(--s-confident); }
-.field-row--needs_review { --rail: var(--s-review); }
-.field-row--missing { --rail: var(--s-unknown-line); }
-
-/* The value that will be typed into the application. It is the thing you are
-   here to check, so it is the largest, darkest thing in the row - the label
-   above it is the caption. Previously this was 10px muted monospace beneath a
-   bold label, i.e. the interface shouted the question and whispered the
-   answer. */
-.field-value {
-  display: block;
-  overflow: hidden;
-  color: var(--ink);
-  font-family: var(--font-data);
-  font-size: 12.5px;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.field-label {
-  display: block;
-  color: var(--ink-2);
-  font-size: 11px;
-  letter-spacing: 0.005em;
-}
-
-.field-provenance {
-  display: block;
-  margin-top: 3px;
-  color: var(--ink-3);
-  font-size: 10.5px;
-  line-height: 1.45;
-}
-
-/* Reading indicator: a rule that sweeps down a stack of lines, which is what
-   scanning a form actually is. One animation, one place. */
-.scan-lines {
-  position: relative;
-  display: grid;
-  gap: 7px;
-  width: 120px;
-  margin: 4px auto 18px;
-  overflow: hidden;
-  padding: 4px 0;
-}
-
-.scan-lines span {
-  height: 5px;
-  border-radius: 999px;
-  background: var(--rule-2);
-}
-
-.scan-lines span:nth-child(2) { width: 74%; }
-.scan-lines span:nth-child(3) { width: 88%; }
-.scan-lines span:nth-child(4) { width: 58%; }
-
-.scan-lines::after {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  content: "";
-  background: var(--ink);
-  animation: scan-sweep 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-@keyframes scan-sweep {
-  0% { top: 0; opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+@layer base {
+  * {
+    box-sizing: border-box;
   }
 
-  /* The sweep is the only thing telling the user a scan is still running, so
-     it needs a still equivalent rather than simply being stopped. */
-  .scan-lines::after {
-    top: 50%;
-    opacity: 1;
+  html,
+  body,
+  #root {
+    min-height: 100%;
   }
-}
 
-@media (max-width: 900px) {
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button,
+  label[for],
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Every count, every applicant value. Tabular so a column of numbers lines up
+     and a changing count does not make the row jump. */
+  .data {
+    font-family: var(--font-data);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* One focus treatment, everywhere, in ink. Visible on both grounds without
+     spending a colour that is supposed to mean something else. */
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--ink) 18%, transparent);
+  }}
+
+@layer components {
+  /* The mark: one cell filled, one cell deliberately left empty.
+     That is the entire product in two squares - it answers what it knows and
+     leaves the rest blank rather than guessing - and it stays legible at 16 px
+     because it is two rectangles and a hairline. */
+  .brand-mark {
+    position: relative;
+    display: inline-grid;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    padding: 3px;
+    border: 1.5px solid var(--ink);
+    border-radius: 7px;
+  }
+
+  .brand-mark::before,
+  .brand-mark::after {
+    content: "";
+    border-radius: 1.5px;
+  }
+
+  .brand-mark::before {
+    background: var(--ink);
+  }
+
+  .brand-mark::after {
+    border: 1.5px solid var(--ink);
+    opacity: 0.32;
+  }
+
+  .brand-mark--small {
+    width: 22px;
+    height: 22px;
+    padding: 2.5px;
+    border-radius: 6px;
+  }
+
+  /* Surfaces --------------------------------------------------------------- */
+  .surface-card {
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--paper);
+    box-shadow: var(--lift-soft);
+  }
+
+  /* Options workspace ------------------------------------------------------- */
+  .options-shell {
+    min-height: 100vh;
+    background: var(--ground);
+  }
+
   .options-layout {
-    display: block;
+    display: grid;
+    grid-template-columns: 236px minmax(0, 1fr);
+    min-height: 100vh;
   }
 
   .options-sidebar {
-    position: relative;
-    height: auto;
-    padding: 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--rule);
+    position: sticky;
+    top: 0;
+    display: flex;
+    height: 100vh;
+    flex-direction: column;
+    padding: 22px 16px 18px;
+    border-right: 1px solid var(--rule);
+    background: var(--paper);
   }
 
   .options-main {
-    padding: 24px 16px 60px;
+    min-width: 0;
+    padding: 30px clamp(22px, 4vw, 56px) 80px;
   }
 
-  .profile-grid {
-    grid-template-columns: 1fr;
+  .options-workspace {
+    width: min(1060px, 100%);
+    margin: 0 auto;
   }
 
   .workspace-topbar {
-    display: block;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 18px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .workspace-title {
+    margin: 0;
+    font-size: 23px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+  }
+
+  .workspace-subtitle {
+    max-width: 62ch;
+    margin: 7px 0 0;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 1.6;
   }
 
   .workspace-actions {
-    justify-content: flex-start;
-    margin-top: 16px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Sections declare their own width. The previous rule selected them by
+     nth-child, so inserting one section silently re-laid out every section after
+     it - and left "Skills" alone in a half-width column beside a hole. */
+  .profile-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* Stretch, not start: the two half-width panels sit side by side, and a
+       short one next to a tall one left a card-shaped hole in the page. */
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .profile-section {
+    position: relative;
+    margin: 0;
+    padding: 18px;
+  }
+
+  .profile-section--wide {
+    grid-column: 1 / -1;
+  }
+
+  .section-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .section-title {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 620;
+    letter-spacing: -0.005em;
+  }
+
+  /* Side panel -------------------------------------------------------------- */
+  .panel-shell {
+    min-height: 100vh;
+    padding: 14px 14px 28px;
+    background: var(--ground);
+    color: var(--ink);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .panel-product-name {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 620;
+    letter-spacing: -0.015em;
+  }
+
+  .panel-icon-button {
+    display: inline-grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink-2);
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+
+  .panel-icon-button:hover {
+    border-color: var(--rule-2);
+    color: var(--ink);
+  }
+
+  .panel-card {
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--paper);
+    box-shadow: var(--lift-soft);
+  }
+
+  /* ---------------------------------------------------------------------------
+     THE CERTAINTY LEDGER - the signature of this interface.
+
+     One bar, segmented in proportion to what the scan actually found. It
+     replaced a grid of four to six equal metric cards, which gave "fields
+     detected" - a number nobody acts on - the same weight as "needs your
+     review", the only number that is a to-do list. Worse, the grid grew from
+     four cards to six after a fill and shifted everything below it.
+
+     A single proportional bar cannot flatter the result. If the extension
+     understood four fields out of nineteen, the grey runs three quarters of the
+     width and you see that before you read a word. A product whose promise is
+     "it will admit what it does not know" should show ignorance at full size.
+     --------------------------------------------------------------------------- */
+  .ledger {
+    display: flex;
+    gap: 2px;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+  }
+
+  .ledger-seg {
+    min-width: 3px;
+    border-radius: 999px;
+    transform-origin: left center;
+    animation: ledger-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .ledger-seg--verified { background: var(--s-verified); }
+  .ledger-seg--confident { background: var(--s-confident); }
+  .ledger-seg--review { background: var(--s-review); }
+  .ledger-seg--unknown { background: var(--s-unknown); opacity: 0.5; }
+
+  @keyframes ledger-in {
+    from { transform: scaleX(0); }
+  }
+
+  .ledger-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 12px;
+  }
+
+  .ledger-key-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ink-2);
+  }
+
+  .ledger-key-dot {
+    width: 6px;
+    height: 6px;
+    align-self: center;
+    flex: 0 0 auto;
+    border-radius: 999px;
+  }
+
+  .ledger-count {
+    font-family: var(--font-data);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* A hairline between two parts of one card. Plain, because a fading gradient
+     rule is a decoration pretending to be structure. */
+  .soft-divider {
+    height: 1px;
+    background: var(--rule);
+  }
+
+  /* Field rows -------------------------------------------------------------- */
+
+  /* The state rail. Reading down the list, the left edge is a stripe whose
+     colour composition IS the trust profile of the application - the same
+     information as the ledger, at the point where you act on it. */
+  .field-row {
+    position: relative;
+    padding: 11px 12px 11px 20px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .field-row:last-child {
+    border-bottom: 0;
+  }
+
+  .field-row::before {
+    position: absolute;
+    top: 11px;
+    bottom: 11px;
+    left: 10px;
+    width: 2px;
+    content: "";
+    border-radius: 999px;
+    background: var(--rail, var(--s-unknown));
+  }
+
+  .field-row--verified { --rail: var(--s-verified); }
+  .field-row--high_confidence { --rail: var(--s-confident); }
+  .field-row--needs_review { --rail: var(--s-review); }
+  .field-row--missing { --rail: var(--s-unknown-line); }
+
+  /* The value that will be typed into the application. It is the thing you are
+     here to check, so it is the largest, darkest thing in the row - the label
+     above it is the caption. Previously this was 10px muted monospace beneath a
+     bold label, i.e. the interface shouted the question and whispered the
+     answer. */
+  .field-value {
+    display: block;
+    overflow: hidden;
+    color: var(--ink);
+    font-family: var(--font-data);
+    font-size: 12.5px;
+    letter-spacing: -0.01em;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .field-label {
+    display: block;
+    color: var(--ink-2);
+    font-size: 11px;
+    letter-spacing: 0.005em;
+  }
+
+  .field-provenance {
+    display: block;
+    margin-top: 3px;
+    color: var(--ink-3);
+    font-size: 10.5px;
+    line-height: 1.45;
+  }
+
+  /* Reading indicator: a rule that sweeps down a stack of lines, which is what
+     scanning a form actually is. One animation, one place. */
+  .scan-lines {
+    position: relative;
+    display: grid;
+    gap: 7px;
+    width: 120px;
+    margin: 4px auto 18px;
+    overflow: hidden;
+    padding: 4px 0;
+  }
+
+  .scan-lines span {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--rule-2);
+  }
+
+  .scan-lines span:nth-child(2) { width: 74%; }
+  .scan-lines span:nth-child(3) { width: 88%; }
+  .scan-lines span:nth-child(4) { width: 58%; }
+
+  .scan-lines::after {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    content: "";
+    background: var(--ink);
+    animation: scan-sweep 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
+  @keyframes scan-sweep {
+    0% { top: 0; opacity: 0; }
+    15% { opacity: 1; }
+    85% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    /* The sweep is the only thing telling the user a scan is still running, so
+       it needs a still equivalent rather than simply being stopped. */
+    .scan-lines::after {
+      top: 50%;
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .options-layout {
+      display: block;
+    }
+
+    .options-sidebar {
+      position: relative;
+      height: auto;
+      padding: 16px;
+      border-right: 0;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .options-main {
+      padding: 24px 16px 60px;
+    }
+
+    .profile-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .workspace-topbar {
+      display: block;
+    }
+
+    .workspace-actions {
+      justify-content: flex-start;
+      margin-top: 16px;
+    }
   }
 }
