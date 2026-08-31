@@ -33,6 +33,11 @@ export default defineConfig({
       // The network gateway. Isolated in its own package so "what can this
       // extension talk to" is answerable by reading one directory.
       '@backend': r('./src/packages/backend'),
+      // The semantic fallback: the fields the deterministic pipeline refused.
+      // Its own package so "what happens to a question we did not recognise"
+      // is answerable by reading one directory - and so that the pipeline that
+      // works offline stays visibly separate from the one that does not.
+      '@semantic': r('./src/packages/semantic'),
     },
   },
   test: {
