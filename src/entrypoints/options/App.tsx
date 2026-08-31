@@ -24,30 +24,35 @@ const TAB_LABELS: Record<Tab, string> = {
   playground: 'Mapping playground',
 };
 
-const TAB_META: Record<Tab, { kicker: string; title: string; description: string }> = {
+/**
+ * The title and one line of orientation for each screen.
+ *
+ * There is no `kicker` any more. Every screen carried a small uppercase label
+ * above its heading - "Profile vault", "Document library", "Personal memory",
+ * "Mapping lab" - and none of them said anything the heading did not. An
+ * eyebrow that restates its own heading is decoration wearing the costume of
+ * structure, and it pushed the actual title a third of the way down the page.
+ */
+const TAB_META: Record<Tab, { title: string; description: string }> = {
   profile: {
-    kicker: 'Profile vault',
-    title: 'Your application identity',
+    title: 'Your profile',
     description:
-      'The verified facts the agent can use with confidence. Add them once, then keep your attention for the questions that actually need it.',
+      'The facts the extension is allowed to use. Anything you type here is treated as verified by you, and nothing the extension reads elsewhere can overwrite it.',
   },
   resume: {
-    kicker: 'Document library',
-    title: 'Resumes, ready when needed',
+    title: 'Your resume',
     description:
-      'Store the version you want attached and review anything the agent extracts before it reaches your profile.',
+      'The file that gets attached to applications, and the fastest way to fill in this profile. You review every value it reads before any of it is kept.',
   },
   learned: {
-    kicker: 'Personal memory',
-    title: 'What the agent learned from you',
+    title: 'Learned rules',
     description:
-      'Every correction becomes a transparent rule. You stay in control of what it remembers and where that rule applies.',
+      'Each correction you make becomes a rule, listed here with where it applies and how often it has been right. Delete any of them.',
   },
   playground: {
-    kicker: 'Mapping lab',
-    title: 'See how a field is understood',
+    title: 'Mapping playground',
     description:
-      'A technical workspace for testing labels, form controls and confidence without touching a real application.',
+      'Type in a label and a control type to see what the extension would make of it, and why. Nothing here touches a real application.',
   },
 };
 
@@ -135,7 +140,7 @@ export function App(): ReactNode {
       <div className="options-shell grid min-h-screen place-items-center">
         <div className="text-center">
           <div className="scan-orbit" aria-hidden="true" />
-          <p className="text-sm text-[var(--ink-2)]">Opening your private workspace…</p>
+          <p className="text-sm text-[var(--ink-2)]">Loading your profile…</p>
         </div>
       </div>
     );
@@ -147,16 +152,9 @@ export function App(): ReactNode {
     <div className="options-shell">
       <div className="options-layout">
         <aside className="options-sidebar">
-          <div className="mb-8 flex items-center gap-3 px-1">
+          <div className="mb-7 flex items-center gap-2.5 px-1">
             <BrandMark />
-            <div>
-              <div className="text-[15px] font-bold tracking-[-0.025em] text-[var(--ink)]">
-                Application Agent
-              </div>
-              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--ink-2)]">
-                Your private operator
-              </div>
-            </div>
+            <div className="text-[13.5px] font-semibold tracking-[-0.02em]">Application Agent</div>
           </div>
 
           <nav className="space-y-1" aria-label="Workspace">
@@ -167,39 +165,34 @@ export function App(): ReactNode {
                   key={candidate}
                   type="button"
                   onClick={() => setTab(candidate)}
-                  className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors ${
                     selected
-                      ? 'bg-[var(--paper-2)] font-semibold text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--rule)]'
+                      ? 'bg-[var(--paper-2)] font-semibold text-[var(--ink)]'
                       : 'text-[var(--ink-2)] hover:bg-[var(--paper-2)] hover:text-[var(--ink)]'
                   }`}
                   aria-current={selected ? 'page' : undefined}
                 >
                   <NavIcon tab={candidate} active={selected} />
                   <span>{TAB_LABELS[candidate]}</span>
-                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--ink)]" />}
                 </button>
               );
             })}
           </nav>
 
-          <div className="mt-auto rounded-2xl border border-[var(--rule)] bg-[var(--paper-2)] p-4">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--ink)]">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--s-verified-wash)] text-[var(--s-verified)]">
-                <ShieldIcon />
-              </span>
-              Private by design
-            </div>
-            <p className="text-[11px] leading-relaxed text-[var(--ink-2)]">
-              Your profile and resumes stay in this browser. Nothing is sent to a cloud service.
-            </p>
-          </div>
+          {/* Stated once, quietly, at the bottom of the sidebar. It is the
+              single most load-bearing fact about the product and it does not
+              need a coloured card to earn attention - it needs to still be
+              true, and to be findable when someone wonders. */}
+          <p className="mt-auto border-t border-[var(--rule)] pt-4 text-[11px] leading-relaxed text-[var(--ink-2)]">
+            Your profile and your resume are stored in this browser only. The extension makes no
+            network requests and has no server to send them to.
+          </p>
         </aside>
 
         <main className="options-main">
           <div className="options-workspace">
             <header className="workspace-topbar">
               <div>
-                <div className="workspace-kicker">{active.kicker}</div>
                 <h1 className="workspace-title">{active.title}</h1>
                 <p className="workspace-subtitle">{active.description}</p>
               </div>
@@ -208,7 +201,7 @@ export function App(): ReactNode {
                 <Button variant="ghost" onClick={handleExport}>
                   <DownloadIcon /> Export
                 </Button>
-                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3.5 py-2 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--rule-2)] hover:bg-[var(--paper)]">
+                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--rule)] bg-[var(--paper)] px-3.5 py-2 text-[13px] font-semibold text-[var(--ink)] transition hover:border-[var(--rule-2)] hover:bg-[var(--paper)]">
                   <UploadIcon /> Import
                   <input
                     type="file"
@@ -283,13 +276,6 @@ function NavIcon({ tab, active }: { tab: Tab; active: boolean }): ReactNode {
     </svg>
   );
 }
-
-const ShieldIcon = (): ReactNode => (
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <path d="M12 3 5.5 5.7v5.1c0 4.2 2.6 7.8 6.5 9.7 3.9-1.9 6.5-5.5 6.5-9.7V5.7z" />
-    <path d="m9.2 12 1.8 1.8 3.9-4" />
-  </svg>
-);
 
 const DownloadIcon = (): ReactNode => <ActionIcon path="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" />;
 const UploadIcon = (): ReactNode => <ActionIcon path="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" />;

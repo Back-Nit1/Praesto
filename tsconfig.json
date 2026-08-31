@@ -31,6 +31,7 @@
       "@fill-engine/*": ["./src/packages/fill-engine/*"],
       "@ats/*": ["./src/packages/ats/*"],
       "@learning/*": ["./src/packages/learning/*"],
+      "@audit/*": ["./src/packages/audit/*"],
       "@backend/*": ["./src/packages/backend/*"]
     }
   },

@@ -27,6 +27,9 @@ export default defineConfig({
       '@fill-engine': r('./src/packages/fill-engine'),
       '@ats': r('./src/packages/ats'),
       '@learning': r('./src/packages/learning'),
+      // Application history. Its own package so "what does the extension
+      // remember about where you applied" is answerable from one directory.
+      '@audit': r('./src/packages/audit'),
       // The network gateway. Isolated in its own package so "what can this
       // extension talk to" is answerable by reading one directory.
       '@backend': r('./src/packages/backend'),

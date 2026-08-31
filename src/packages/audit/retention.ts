@@ -72,44 +72,45 @@ export function planPrune(
 ): string[] {
   const cutoff = new Date(now.getTime() - policy.maxAgeDays * 24 * 60 * 60 * 1000).toISOString();
 
-  const condemned = new Set<string>();
-  const seenRuns = new Set<string>();
-  let rowsKept = 0;
-
-  // First pass: decide which RUNS die. Entries arrive newest first, so a run's
-  // position in `seenRuns` is its recency rank.
+  // Group first, decide second. The three rules are all about RUNS, and a rule
+  // applied row by row cannot answer "would admitting this run overflow the
+  // ceiling?" without already knowing how big the run is.
+  const runs = new Map<string, RetentionEntry[]>();
   for (const entry of entries) {
-    if (condemned.has(entry.runId)) continue;
-
-    const isNewRun = !seenRuns.has(entry.runId);
-
-    // Age. Checked before the caps so an old run is dropped even when the
-    // history is nearly empty - retention is a privacy promise, not only a
-    // storage limit.
-    if (entry.timestamp < cutoff) {
-      condemned.add(entry.runId);
-      continue;
-    }
-
-    // Run cap. `seenRuns.size` is the number of runs already being kept, so a
-    // NEW run arriving when the cap is full is the first one over the line.
-    if (isNewRun && seenRuns.size >= policy.maxRuns) {
-      condemned.add(entry.runId);
-      continue;
-    }
-
-    // Row cap. Applied to whole runs: a run that would take us past the ceiling
-    // is refused entirely rather than half-stored.
-    if (isNewRun && rowsKept >= policy.maxRecords) {
-      condemned.add(entry.runId);
-      continue;
-    }
-
-    seenRuns.add(entry.runId);
-    rowsKept++;
+    const existing = runs.get(entry.runId);
+    if (existing === undefined) runs.set(entry.runId, [entry]);
+    else existing.push(entry);
   }
 
-  // Second pass: every row of every condemned run, including rows that the
-  // first pass had already counted as kept before the run was condemned.
-  return entries.filter((entry) => condemned.has(entry.runId)).map((entry) => entry.id);
+  const doomed: string[] = [];
+  let runsKept = 0;
+  let rowsKept = 0;
+
+  // Map iteration is insertion order, and `entries` arrives newest first, so
+  // this walks runs from most to least recent.
+  for (const [, rows] of runs) {
+    const timestamp = rows[0]?.timestamp ?? '';
+
+    // Age first, and it is absolute: an old run goes even when the history is
+    // otherwise empty. Retention is a privacy promise, not only a size limit.
+    const tooOld = timestamp < cutoff;
+
+    // The caps, in contrast, never take the newest surviving run. A user who
+    // has just filled a 400-field form must still see that run in their
+    // history; a ceiling that made the thing you just did invisible would read
+    // as the feature being broken.
+    const isFirstKept = runsKept === 0;
+    const overRunCap = !isFirstKept && runsKept >= policy.maxRuns;
+    const overRowCap = !isFirstKept && rowsKept + rows.length > policy.maxRecords;
+
+    if (tooOld || overRunCap || overRowCap) {
+      for (const row of rows) doomed.push(row.id);
+      continue;
+    }
+
+    runsKept++;
+    rowsKept += rows.length;
+  }
+
+  return doomed;
 }

@@ -371,7 +371,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         />
       </Section>
 
-      <Section title="Links">
+      <Section title="Links" wide>
         <Field
           label="LinkedIn"
           value={profile.links.linkedin.raw ?? text(profile.links.linkedin)}
@@ -418,7 +418,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         />
       </Section>
 
-      <Section title="Education">
+      <Section title="Education" wide>
         <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           Most applications ask about one school. The one with the most recent graduation date is
           the one offered first, so list them in whatever order suits you.
@@ -435,7 +435,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         <AddButton label="Add a school" onClick={() => addEntry('education')} />
       </Section>
 
-      <Section title="Work experience">
+      <Section title="Work experience" wide>
         {profile.employment.map((entry, index) => (
           <EmploymentEntry
             key={entry.id}
@@ -448,7 +448,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         <AddButton label="Add a job" onClick={() => addEntry('employment')} />
       </Section>
 
-      <Section title="Projects">
+      <Section title="Projects" wide>
         {profile.projects.map((entry, index) => (
           <ProjectEntry
             key={entry.id}
@@ -461,7 +461,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         <AddButton label="Add a project" onClick={() => addEntry('projects')} />
       </Section>
 
-      <Section title="Skills">
+      <Section title="Skills" wide>
         <CommaListField
           label="Skills"
           value={list(profile.skills)}
@@ -471,7 +471,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         />
       </Section>
 
-      <Section title="Salary, availability and location">
+      <Section title="Salary, availability and location" wide>
         <Field
           label="Desired salary"
           value={
@@ -497,7 +497,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         />
       </Section>
 
-      <Section title="Work authorization">
+      <Section title="Work authorization" wide>
         {/*
           These four are the highest-stakes values in the profile. A wrong answer
           is a false statement to an employer, so they are answered ONLY here,
@@ -534,7 +534,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
         />
       </Section>
 
-      <Section title="Voluntary self-identification">
+      <Section title="Voluntary self-identification" wide>
         {/*
           Stored as free text rather than a fixed vocabulary, because every ATS
           words its options differently and translating the user's answer into
