@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  Fixture: a Lever-shaped application, for the SEMANTIC FALLBACK.
+
+  Hand-written from Lever's published conventions, NOT captured from a real
+  application - see the header of greenhouse-semantic.html for why that
+  distinction is written down rather than glossed.
+
+  What is real here:
+    - `cards[<uuid>][field<N>]` naming, which carries NO semantic content at
+      all. Greenhouse at least leaks "text_value"; Lever leaks nothing, so the
+      label is the only signal and a form whose label is unusual is a form the
+      deterministic cascade cannot help with.
+    - radio groups rather than selects for custom questions.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Apply</title></head>
+  <body>
+    <form>
+      <label for="name">Full name✱</label>
+      <input id="name" name="name" type="text" autocomplete="name" />
+
+      <label for="loc">Current location✱</label>
+      <input id="loc" name="location" type="text" />
+
+      <!-- A question with a generated name and prose the alias table has never
+           seen. -->
+      <label for="c1">Where are you hoping to be based day to day?</label>
+      <select id="c1" name="cards[8f2a1c9e-1111-4a2b-9c3d-000000000001][field0]">
+        <option value=""></option>
+        <option value="1">Trenton</option>
+        <option value="2">New York City</option>
+        <option value="3">Fully remote</option>
+      </select>
+
+      <fieldset>
+        <legend>How long have you been building software professionally?</legend>
+        <label><input type="radio" name="cards[8f2a1c9e-1111-4a2b-9c3d-000000000001][field1]" value="a" /> Under 2 years</label>
+        <label><input type="radio" name="cards[8f2a1c9e-1111-4a2b-9c3d-000000000001][field1]" value="b" /> 2 to 5 years</label>
+        <label><input type="radio" name="cards[8f2a1c9e-1111-4a2b-9c3d-000000000001][field1]" value="c" /> Over 5 years</label>
+      </fieldset>
+    </form>
+  </body>
+</html>

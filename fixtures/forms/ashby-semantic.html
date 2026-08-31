@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  Fixture: an Ashby-shaped application, for the SEMANTIC FALLBACK.
+
+  Hand-written from Ashby's published conventions, NOT captured from a real
+  application - see greenhouse-semantic.html.
+
+  What is real here:
+    - `_systemfield_` prefixes on the standard fields and opaque UUIDs on the
+      custom ones;
+    - ARIA comboboxes rather than native selects, which is why `combobox` is a
+      first-class `ControlKind` and why the option list arrives as a listbox
+      rather than as <option> elements.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Apply</title></head>
+  <body>
+    <form>
+      <label for="sysname">Name</label>
+      <input id="sysname" name="_systemfield_name" type="text" autocomplete="name" />
+
+      <label id="school-label">Most recent school</label>
+      <div
+        role="combobox"
+        id="school"
+        aria-labelledby="school-label"
+        aria-expanded="false"
+        aria-controls="school-list"
+      ></div>
+      <ul role="listbox" id="school-list">
+        <li role="option" data-value="1">Rutgers University - New Brunswick</li>
+        <li role="option" data-value="2">Rutgers University - Newark</li>
+        <li role="option" data-value="3">Princeton University</li>
+      </ul>
+
+      <label id="major-label">What did you concentrate in?</label>
+      <div
+        role="combobox"
+        id="major"
+        aria-labelledby="major-label"
+        aria-expanded="false"
+        aria-controls="major-list"
+      ></div>
+      <ul role="listbox" id="major-list">
+        <li role="option" data-value="1">Engineering, Computer</li>
+        <li role="option" data-value="2">Computer Science</li>
+      </ul>
+    </form>
+  </body>
+</html>

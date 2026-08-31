@@ -28,8 +28,18 @@ export class FakeSemanticPort implements SemanticPort {
     private readonly behaviour: {
       /** Answer for a given question, by field id. Absent means `null`. */
       concepts?: Record<string, string | null>;
+      /**
+       * Answer by the QUESTION TEXT rather than by field id.
+       *
+       * The form of this fake that fixture tests want: a `localId` is
+       * per-scan, so a test that scans a document twice cannot key on one.
+       * Question text is what the model would actually be reasoning from.
+       */
+      conceptFor?: (question: ConceptQuestion) => string | null | undefined;
       /** Stage-2 answer, by field id. */
       options?: Record<string, string | null>;
+      /** Stage-2 answer, from the request. Takes precedence over `options`. */
+      optionFor?: (question: OptionChoiceQuestion) => string | null | undefined;
       /** When set, stage 1 fails with this error instead of answering. */
       conceptError?: AppError;
       /** When set, stage 2 fails with this error instead of answering. */
@@ -46,7 +56,10 @@ export class FakeSemanticPort implements SemanticPort {
     return ok(
       questions.map((question) => ({
         fieldId: question.fieldId,
-        profilePath: this.behaviour.concepts?.[question.fieldId] ?? null,
+        profilePath:
+          this.behaviour.conceptFor?.(question) ??
+          this.behaviour.concepts?.[question.fieldId] ??
+          null,
       })),
     );
   }
@@ -59,7 +72,8 @@ export class FakeSemanticPort implements SemanticPort {
 
     return ok({
       fieldId: question.fieldId,
-      optionLabel: this.behaviour.options?.[question.fieldId] ?? null,
+      optionLabel:
+        this.behaviour.optionFor?.(question) ?? this.behaviour.options?.[question.fieldId] ?? null,
     });
   }
 
