@@ -34,9 +34,44 @@ import {
   type MergeReport,
 } from '@profile/repository';
 import { labelForPath } from '@profile/paths';
-import { bestConfidence, type ApplicantProfile, type ProfileValue } from '@profile/schema';
+import { applyEntryDecisions, type EntryDecisionInput } from '@profile/entry-matching';
+import {
+  bestConfidence,
+  type ApplicantProfile,
+  type Education,
+  type Employment,
+  type Project,
+  type ProfileValue,
+} from '@profile/schema';
 import { parseResume, type ResumeParseResult } from '@resume-parser/index';
 import { createLogger } from '@shared/logging';
+import {
+  EducationReview,
+  EmploymentReview,
+  ProjectReview,
+  reviewEntries,
+  type EntryReview,
+} from './ResumeEntryReview';
+
+/**
+ * The parsed schools, jobs and projects, each with the user's decision about it.
+ *
+ * Held next to `parsed` rather than derived from it, because it carries two
+ * things the parse does not: the entries as the user has EDITED them, and what
+ * they chose to do with each one.
+ */
+interface EntryReviews {
+  education: EntryReview<Education>[];
+  employment: EntryReview<Employment>[];
+  projects: EntryReview<Project>[];
+}
+
+const NO_ENTRIES: EntryReviews = { education: [], employment: [], projects: [] };
+
+/** Strip a review down to what `applyEntryDecisions` needs. */
+function toDecision<T>({ entry, decision, match }: EntryReview<T>): EntryDecisionInput<T> {
+  return { entry, decision, ...(match === null ? {} : { matchIndex: match.index }) };
+}
 
 const log = createLogger('options:resume');
 
@@ -67,6 +102,7 @@ export function ResumeImport({
   const [defaultId, setDefaultId] = useState<string | undefined>(undefined);
   const [parsed, setParsed] = useState<ResumeParseResult | undefined>(undefined);
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  const [reviews, setReviews] = useState<EntryReviews>(NO_ENTRIES);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
     kind: 'idle',
@@ -150,6 +186,26 @@ export function ResumeImport({
     // Pre-check everything so accepting a good parse is one click. Unchecking
     // is the exception, and the user is looking at every row regardless.
     setAccepted(new Set(Object.keys(result.value.scalars)));
+
+    /*
+      Entries are matched against what the profile ALREADY holds, which is why
+      this reads the profile rather than starting from the parse alone. A
+      re-upload is the common case, not the edge case: without this, the second
+      upload of a lightly-edited resume appends a second copy of every job.
+
+      A failed read is not fatal - it means nothing is recognised as a
+      duplicate, so every entry is offered as new. That is the same behaviour
+      as importing into an empty profile, and it over-offers rather than
+      silently dropping anything.
+    */
+    const held = await profiles.load();
+    const profile = held.ok ? held.value : undefined;
+    setReviews({
+      education: reviewEntries('education', result.value.education, profile?.education ?? []),
+      employment: reviewEntries('employment', result.value.employment, profile?.employment ?? []),
+      projects: reviewEntries('projects', result.value.projects, profile?.projects ?? []),
+    });
+
     setBusy(false);
   }
 
@@ -180,15 +236,37 @@ export function ResumeImport({
     // resolves, so there is no window in which this is read stale.
     let report: MergeReport | undefined;
 
+    // Same reasoning as `report`: captured from inside the mutation, which runs
+    // once and synchronously.
+    let entryCounts = { added: 0, updated: 0, skipped: 0 };
+
     const saved = await profiles.update((profile) => {
-      // Repeated entities are appended wholesale. They have no existing slot
-      // to conflict with, and the merge only handles paths into slots that
-      // already exist - see its `out_of_range` case.
+      /*
+        Repeated entities are applied per entry, according to what the user
+        chose for each: skipped, appended, or merged into the entry it
+        duplicates. This is the only place those choices take effect - the
+        review screen never writes anything.
+
+        The profile is re-read here, INSIDE the mutation, so the decisions are
+        applied to whatever storage holds now rather than to the copy the
+        review screen was built from. An update whose target has since moved is
+        appended instead of silently discarded - see `applyEntryDecisions`.
+      */
+      const education = applyEntryDecisions(profile.education, reviews.education.map(toDecision));
+      const employment = applyEntryDecisions(profile.employment, reviews.employment.map(toDecision));
+      const projects = applyEntryDecisions(profile.projects, reviews.projects.map(toDecision));
+
+      entryCounts = {
+        added: education.added + employment.added + projects.added,
+        updated: education.updated + employment.updated + projects.updated,
+        skipped: education.skipped + employment.skipped + projects.skipped,
+      };
+
       const withEntries: ApplicantProfile = {
         ...profile,
-        education: [...profile.education, ...parsed.education],
-        employment: [...profile.employment, ...parsed.employment],
-        projects: [...profile.projects, ...parsed.projects],
+        education: education.entries,
+        employment: employment.entries,
+        projects: projects.entries,
       };
 
       const merged = mergeCandidatesInto(withEntries, candidates);
@@ -209,6 +287,7 @@ export function ResumeImport({
       conflicts: [],
     };
     setParsed(undefined);
+    setReviews(NO_ENTRIES);
 
     // The Profile tab is holding a copy loaded before this import. Tell it to
     // reload, or its next Save overwrites everything just merged.
@@ -222,6 +301,17 @@ export function ResumeImport({
     }
     if (conflicts.length > 0) {
       parts.push(`${conflicts.length} disagreed with existing values - check the Profile tab`);
+    }
+    if (entryCounts.added > 0) {
+      parts.push(`${entryCounts.added} entr${entryCounts.added === 1 ? 'y' : 'ies'} added`);
+    }
+    if (entryCounts.updated > 0) {
+      parts.push(`${entryCounts.updated} existing updated`);
+    }
+    // Said out loud, because silence about a skipped duplicate reads as the
+    // import having lost it.
+    if (entryCounts.skipped > 0) {
+      parts.push(`${entryCounts.skipped} skipped as already in your profile`);
     }
     setStatus({ kind: 'ok', message: `${parts.join('. ')}.` });
   }
@@ -250,13 +340,13 @@ export function ResumeImport({
     <div className="max-w-4xl space-y-6">
       <section className="surface-card relative overflow-hidden p-6 sm:p-8">
         <div className="relative z-10 max-w-2xl">
-          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[var(--app-accent-soft)] text-[--app-accent]">
+          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[var(--paper-2)] text-[var(--ink)]">
             <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold tracking-[-0.025em] text-[--app-text]">Bring your resume into the vault</h2>
-          <p className="mb-5 mt-2 text-sm leading-relaxed text-[--app-muted]">
+          <h2 className="text-xl font-semibold tracking-[-0.025em] text-[var(--ink)]">Bring your resume into the vault</h2>
+          <p className="mb-5 mt-2 text-sm leading-relaxed text-[var(--ink-2)]">
             Upload a PDF once. It stays in this browser, helps build your profile, and is ready to attach when an application asks for it.
           </p>
 
@@ -275,17 +365,17 @@ export function ResumeImport({
             thing this product does not do.
           */}
           {editsPending && (
-            <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-[--app-text]">
+            <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-[var(--ink)]">
               You have unsaved changes on the Profile tab. Save or discard them first - importing
               now would be undone the next time you save.
             </p>
           )}
 
           <label
-            className={`inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition ${
+            className={`inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--ink)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_22px_rgba(81,65,210,0.2)] transition ${
               editsPending || busy
                 ? 'cursor-not-allowed opacity-50'
-                : 'cursor-pointer hover:-translate-y-px hover:bg-[var(--app-accent-strong)]'
+                : 'cursor-pointer hover:-translate-y-px hover:bg-[var(--action-hover)]'
             }`}
           >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V5m0 0 4 4m-4-4L8 9M5 19h14" /></svg>
@@ -311,30 +401,30 @@ export function ResumeImport({
 
       {stored.length > 0 && (
         <section className="surface-card p-5">
-          <h3 className="mb-3 text-sm font-semibold text-[--app-text]">
-            Saved resumes <span className="ml-1 text-[--app-muted]">{stored.length}</span>
+          <h3 className="mb-3 text-sm font-semibold text-[var(--ink)]">
+            Saved resumes <span className="ml-1 text-[var(--ink-2)]">{stored.length}</span>
           </h3>
           <ul className="space-y-2">
             {stored.map((document) => (
               <li
                 key={document.id}
-                className="flex items-center justify-between rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3.5 py-3 text-sm"
+                className="flex items-center justify-between rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3.5 py-3 text-sm"
               >
                 <span className="min-w-0 flex-1 truncate">
                   {document.fileName}
-                  <span className="ml-2 text-xs text-[--app-muted]">
+                  <span className="ml-2 text-xs text-[var(--ink-2)]">
                     {Math.round(document.sizeBytes / 1024)} KB ·{' '}
                     {new Date(document.addedAt).toLocaleDateString()}
                   </span>
                 </span>
                 <div className="flex shrink-0 items-center gap-3">
                   {defaultId === document.id ? (
-                    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-[--app-success]">Default</span>
+                    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-[var(--s-verified)]">Default</span>
                   ) : (
                     <button
                       type="button"
                       onClick={() => void handleSetDefault(document.id)}
-                      className="text-xs font-semibold text-[--app-accent] hover:underline"
+                      className="text-xs font-semibold text-[var(--ink)] hover:underline"
                     >
                       Use this one
                     </button>
@@ -342,7 +432,7 @@ export function ResumeImport({
                   <button
                     type="button"
                     onClick={() => void handleDelete(document.id)}
-                    className="text-xs font-semibold text-[--app-danger] hover:underline"
+                    className="text-xs font-semibold text-[var(--danger)] hover:underline"
                   >
                     Delete
                   </button>
@@ -357,6 +447,13 @@ export function ResumeImport({
         <ReviewExtraction
           parsed={parsed}
           accepted={accepted}
+          reviews={reviews}
+          onReview={(kind, index, next) =>
+            setReviews((current) => ({
+              ...current,
+              [kind]: current[kind].map((review, at) => (at === index ? next : review)),
+            }))
+          }
           busy={busy}
           onToggle={(path) =>
             setAccepted((current) => {
@@ -369,6 +466,7 @@ export function ResumeImport({
           onAccept={() => void handleAccept()}
           onDiscard={() => {
             setParsed(undefined);
+            setReviews(NO_ENTRIES);
             log.info('Extraction discarded by the user');
           }}
         />
@@ -389,15 +487,23 @@ export function ResumeImport({
 function ReviewExtraction({
   parsed,
   accepted,
+  reviews,
   busy,
   onToggle,
+  onReview,
   onAccept,
   onDiscard,
 }: {
   parsed: ResumeParseResult;
   accepted: Set<string>;
+  reviews: EntryReviews;
   busy: boolean;
   onToggle: (path: string) => void;
+  onReview: <K extends keyof EntryReviews>(
+    kind: K,
+    index: number,
+    next: EntryReviews[K][number],
+  ) => void;
   onAccept: () => void;
   onDiscard: () => void;
 }): ReactNode {
@@ -406,16 +512,16 @@ function ReviewExtraction({
   return (
     <section className="surface-card space-y-4 border-indigo-500/20 p-5">
       <div>
-        <h3 className="text-base font-semibold text-[--app-text]">Check what we read</h3>
-        <p className="mt-1 text-sm text-[--app-muted]">
+        <h3 className="text-base font-semibold text-[var(--ink)]">Check what we read</h3>
+        <p className="mt-1 text-sm text-[var(--ink-2)]">
           Nothing is saved until you accept it. Uncheck anything that is wrong — a blank field is
           always better than a wrong one.
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[var(--app-border)]">
+      <div className="overflow-x-auto rounded-xl border border-[var(--rule)]">
       <table className="w-full text-left text-sm">
-        <thead className="bg-[var(--app-panel-soft)] text-[10px] uppercase tracking-[0.12em] text-[--app-muted]">
+        <thead className="bg-[var(--paper-2)] text-[10px] uppercase tracking-[0.12em] text-[var(--ink-2)]">
           <tr>
             <th className="w-8 py-1" />
             <th className="py-1">Field</th>
@@ -427,7 +533,7 @@ function ReviewExtraction({
           {entries.map(([path, value]) => {
             const confidence = bestConfidence(value);
             return (
-              <tr key={path} className="border-t border-[var(--app-border)]">
+              <tr key={path} className="border-t border-[var(--rule)]">
                 <td className="py-2">
                   <input
                     type="checkbox"
@@ -446,7 +552,7 @@ function ReviewExtraction({
                   </span>
                 </td>
                 <td className="py-2 pr-3 font-medium">{renderValue(value.value)}</td>
-                <td className="py-2 text-xs text-[--app-muted]">
+                <td className="py-2 text-xs text-[var(--ink-2)]">
                   {value.evidence[0]?.originalText ?? '—'}
                 </td>
               </tr>
@@ -456,19 +562,29 @@ function ReviewExtraction({
       </table>
       </div>
 
-      {(parsed.education.length > 0 ||
-        parsed.employment.length > 0 ||
-        parsed.projects.length > 0) && (
-        <p className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3 text-sm leading-relaxed text-[--app-muted]">
-          Also found {parsed.education.length} education, {parsed.employment.length} experience and{' '}
-          {parsed.projects.length} project entries. These are added as-is — review them in the
-          Profile tab, where you can correct anything that was read wrong.
-        </p>
-      )}
+      {/*
+        Schools, jobs and projects, each individually acceptable and editable.
+        These used to be a sentence saying they had been added as-is and could
+        be corrected in the Profile tab - which meant the one screen built for
+        checking a parse was the one place its biggest half could not be
+        checked.
+      */}
+      <EducationReview
+        reviews={reviews.education}
+        onChange={(index, next) => onReview('education', index, next)}
+      />
+      <EmploymentReview
+        reviews={reviews.employment}
+        onChange={(index, next) => onReview('employment', index, next)}
+      />
+      <ProjectReview
+        reviews={reviews.projects}
+        onChange={(index, next) => onReview('projects', index, next)}
+      />
 
       <div className="flex gap-2">
         <Button onClick={onAccept} disabled={busy}>
-          Add {accepted.size} field{accepted.size === 1 ? '' : 's'} to my profile
+          {saveLabel(accepted.size, keptEntries(reviews))}
         </Button>
         <Button variant="secondary" onClick={onDiscard} disabled={busy}>
           Discard
@@ -494,4 +610,26 @@ function renderValue(value: unknown): string {
     return record.national ?? record.raw ?? JSON.stringify(value);
   }
   return String(value);
+}
+
+/** How many parsed entries are currently set to be added or merged. */
+function keptEntries(reviews: EntryReviews): number {
+  const kept = <T,>(list: EntryReview<T>[]): number =>
+    list.filter((review) => review.decision !== 'skip').length;
+  return kept(reviews.education) + kept(reviews.employment) + kept(reviews.projects);
+}
+
+/**
+ * What the accept button promises.
+ *
+ * It names both halves of what is about to happen. A button reading "add 7
+ * fields" while also merging four jobs would be understating an action on the
+ * user's employment history - the part they would most want warning about.
+ */
+function saveLabel(fields: number, entries: number): string {
+  const parts: string[] = [];
+  if (fields > 0) parts.push(`${fields} field${fields === 1 ? '' : 's'}`);
+  if (entries > 0) parts.push(`${entries} entr${entries === 1 ? 'y' : 'ies'}`);
+  if (parts.length === 0) return 'Nothing selected';
+  return `Add ${parts.join(' and ')} to my profile`;
 }
