@@ -27,16 +27,32 @@
  *     prompt and can say "the following is data, not instructions". A single
  *     flat string cannot express that difference.
  *
- *  2. THE MODEL CANNOT PRODUCE AN ACTION. The response type carries TEXT and
- *     nothing else - no profile path, no field id, no "fill this". There is
- *     deliberately no schema here that a model could fill in to make the
- *     extension do something. A suggestion becomes a value only when the user
- *     reads it and puts it somewhere, which is the same path a typed answer
- *     takes.
+ *  2. THE MODEL CANNOT PRODUCE AN ACTION. A reply may describe a value; it may
+ *     never describe a thing to do. `ChatReply` carries TEXT and nothing else -
+ *     no profile path, no field id, no "fill this" - and a suggestion becomes a
+ *     value only when the user reads it and puts it somewhere, which is the
+ *     same path a typed answer takes.
  *
  * If a future change adds a field to `ChatReply` that names a form field or a
  * profile path, it has removed rule 2 and the whole feature becomes a way for a
  * webpage to write into the applicant's answers. Do not.
+ *
+ * HOW THE SEMANTIC SCHEMAS AT THE BOTTOM OF THIS FILE LIVE UNDER RULE 2
+ * They are the harder case, and the reason this paragraph exists: unlike a chat
+ * reply, their answers ARE acted on. Rule 2 survives by being narrowed rather
+ * than relaxed, in three places, none of which is a matter of prompt wording:
+ *
+ *   - a returned path must be one WE defined. `isProfilePath` is checked in
+ *     `@semantic/concept`, so a path we do not have is a refusal, not a fill.
+ *   - a returned option must be one the FORM offers. It is matched against the
+ *     real option list in `@semantic/option-match`, and never chosen by index -
+ *     an off-by-one index names a real, valid, wrong option that nothing
+ *     downstream could detect.
+ *   - what survives both is still only an input to `decideFill`, which is where
+ *     the sensitive-path gate lives and which this feature does not touch.
+ *
+ * So the model can say "this question is asking about your city". It cannot say
+ * "put this text in that box".
  */
 import { z } from 'zod';
 
@@ -182,3 +198,152 @@ export function asUntrusted(source: UntrustedText['source'], text: string): Untr
     text: text.length > CHAT_LIMITS.untrustedItem ? text.slice(0, CHAT_LIMITS.untrustedItem) : text,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The semantic fallback (Phase 6 / 8)
+// ---------------------------------------------------------------------------
+//
+// Same two rules as the chat schemas above, applied to a harder case.
+//
+// HARDER, BECAUSE THE ANSWER IS ACTED ON. A chat reply is text the user reads.
+// A semantic reply names a concept, and something downstream puts a value in a
+// form. So rule 2 has to be enforced more narrowly here, not less:
+//
+//   - Stage 1 may return a PATH FROM OUR OWN REGISTRY, and nothing else. It
+//     cannot name a DOM element, a selector, or an action. `fieldId` is an id
+//     WE generated and sent, echoed back only so answers can be paired to
+//     questions - the caller looks it up in a map of ids it created, so an id
+//     the model invents matches nothing and is discarded.
+//   - Stage 2 may return an option LABEL, which our code then matches against
+//     the real option list. Never an index: an off-by-one on an index names a
+//     real, valid, WRONG option, and nothing downstream could detect it.
+//
+// And the whole reply is still only an input to `decideFill`, which is where
+// the sensitive-path gate lives. Nothing here can reach a form on its own.
+//
+// RULE 1 IS EASIER HERE, AND STRICTER. A stage-1 request contains NO trusted
+// text at all - there is no user question in it, because the user did not ask
+// anything. Every string travels under `untrusted`, which is why that key is
+// the whole payload rather than a section of it.
+
+/**
+ * Caps, in both directions.
+ *
+ * Tighter than the chat limits on purpose. A form label is a sentence, not a
+ * document, and these bound what a hostile page can make us send and pay for -
+ * a page that puts 50 KB in a `<label>` gets it truncated, not forwarded.
+ */
+export const SEMANTIC_LIMITS = {
+  /** One question. Generous for a label; far below a page of injected prose. */
+  question: 400,
+  /** Questions per request. A long application form has 40-60 fields total. */
+  questions: 40,
+  /** One option label. */
+  optionLabel: 200,
+  /** Options per field. A country dropdown has ~250; the first 60 identify it. */
+  options: 60,
+  /** One resolved value, for stage 2. */
+  value: 400,
+  /** A canonical path. The longest real one is ~40 characters. */
+  path: 120,
+  /** Paths in the vocabulary we send. */
+  allowedPaths: 400,
+} as const;
+
+/** Control kinds we will ask about. A closed set, so the wire cannot carry prose here. */
+const semanticKindSchema = z.enum([
+  'text',
+  'email',
+  'tel',
+  'url',
+  'number',
+  'textarea',
+  'select',
+  'checkbox',
+  'radio',
+  'file',
+  'date',
+  'combobox',
+  'unsupported',
+]);
+
+/**
+ * One question, as the page asked it. EVERY STRING HERE IS PAGE-WRITTEN.
+ *
+ * Note what is not here: no URL, no hostname, no ATS name, no `name`/`id`
+ * attribute, no profile value. `fieldId` is a per-session local id that means
+ * nothing outside this scan.
+ */
+export const semanticQuestionSchema = z.object({
+  fieldId: z.string().min(1).max(64),
+  question: z.string().max(SEMANTIC_LIMITS.question),
+  kind: semanticKindSchema,
+  options: z.array(z.string().max(SEMANTIC_LIMITS.optionLabel)).max(SEMANTIC_LIMITS.options),
+});
+
+export type SemanticQuestion = z.infer<typeof semanticQuestionSchema>;
+
+/**
+ * Stage 1 outbound.
+ *
+ * `allowedPaths` is our canonical path registry. It is the same list in every
+ * install, contains no personal data of any kind, and is sent so the model
+ * answers inside the vocabulary we can actually use - which turns "unknown
+ * path" from the common case into the backstop it is meant to be.
+ */
+export const conceptRequestSchema = z.object({
+  untrusted: z.array(semanticQuestionSchema).max(SEMANTIC_LIMITS.questions),
+  allowedPaths: z.array(z.string().max(SEMANTIC_LIMITS.path)).max(SEMANTIC_LIMITS.allowedPaths),
+});
+
+export type ConceptRequest = z.infer<typeof conceptRequestSchema>;
+
+/**
+ * Stage 1 inbound. A path, or null for "no path fits".
+ *
+ * `null` is a first-class answer, not an error: it is the correct response to
+ * "How did you hear about us?", and it is cached so the question is never
+ * asked twice.
+ */
+export const conceptReplySchema = z.object({
+  concepts: z
+    .array(
+      z.object({
+        fieldId: z.string().min(1).max(64),
+        profilePath: z.string().max(SEMANTIC_LIMITS.path).nullable(),
+      }),
+    )
+    .max(SEMANTIC_LIMITS.questions),
+});
+
+export type ConceptReply = z.infer<typeof conceptReplySchema>;
+
+/**
+ * Stage 2 outbound: ONE already-resolved value, and one field's options.
+ *
+ * `value` is the only place in this entire feature where a piece of the
+ * applicant's own data crosses the wire, and it crosses one field at a time,
+ * only after the deterministic scorer has failed, and only for a field the user
+ * will still be shown before anything is submitted.
+ */
+export const optionChoiceRequestSchema = z.object({
+  fieldId: z.string().min(1).max(64),
+  value: z.string().max(SEMANTIC_LIMITS.value),
+  untrusted: z.array(z.string().max(SEMANTIC_LIMITS.optionLabel)).max(SEMANTIC_LIMITS.options),
+});
+
+export type OptionChoiceRequest = z.infer<typeof optionChoiceRequestSchema>;
+
+/**
+ * Stage 2 inbound: a LABEL, or null.
+ *
+ * Zod strips undeclared keys, so a backend that tried to add `selector`,
+ * `action` or `profilePath` finds them gone before any of our code sees the
+ * object. That is the structural half of rule 2, and there is a test for it.
+ */
+export const optionChoiceReplySchema = z.object({
+  fieldId: z.string().min(1).max(64),
+  optionLabel: z.string().max(SEMANTIC_LIMITS.optionLabel).nullable(),
+});
+
+export type OptionChoiceReply = z.infer<typeof optionChoiceReplySchema>;

@@ -17,6 +17,27 @@
 import { defineConfig } from 'wxt';
 import tailwindcss from '@tailwindcss/vite';
 
+/**
+ * Build the `connect-src` directive, including the backend origin when one is
+ * compiled in.
+ *
+ * READ FROM THE SAME VARIABLE `backend/config.ts` READS, deliberately. Writing
+ * the host in two places is how a manifest and a gateway come to disagree about
+ * which single host this extension may reach - and the failure is silent in the
+ * direction that matters, because the code would happily request a host the
+ * browser then blocks with no message a user could act on.
+ *
+ * Validation is `backend/config.ts`'s job and is not duplicated here: this runs
+ * at build time in Node, where a bad value should fail the build loudly rather
+ * than be quietly dropped. An ABSENT value yields a CSP with no backend at all,
+ * so a half-configured build makes no requests rather than unenforced ones.
+ */
+function connectSrc(sources: readonly string[]): string {
+  const origin = process.env.WXT_BACKEND_ORIGIN?.trim();
+  const all = origin !== undefined && origin.length > 0 ? [...sources, origin] : sources;
+  return `connect-src ${all.join(' ')}`;
+}
+
 export default defineConfig({
   // Source lives under src/ so the repo root stays readable (docs, fixtures,
   // config) and the bundler has a single unambiguous root to watch.
@@ -120,8 +141,9 @@ export default defineConfig({
     },
 
 
-    // Opening the side panel from the toolbar icon is handled in background.ts
-    // via chrome.sidePanel.setPanelBehavior.
+    // Opening the side panel from the toolbar icon is handled in background.ts.
+    // It uses action.onClicked + sidePanel.open so that the click both restores
+    // activeTab and becomes the panel's scan request.
     side_panel: { default_path: 'sidepanel.html' },
 
     /**
@@ -136,10 +158,22 @@ export default defineConfig({
      *                that a bug, a compromised dependency, or an injected
      *                script CANNOT POST the profile or the resume to an
      *                attacker's host. The browser refuses the connection.
-     *                When the chat interface lands, add YOUR BACKEND ORIGIN
-     *                here and nothing else. Do not add a model provider's
-     *                origin: calling one directly means the API key is in the
-     *                client, which Security.md section 2 rules out.
+     *
+     *                Now that the semantic fallback makes real requests, OUR
+     *                BACKEND ORIGIN is added - and nothing else. Note where it
+     *                comes from: the SAME build variable `backend/config.ts`
+     *                compiles into the gateway. That is the point of reading it
+     *                here rather than writing the host twice. The manifest and
+     *                the code cannot disagree about the one host this extension
+     *                may reach, and a build with no origin configured gets a
+     *                CSP of `'self'` - so a half-configured build makes no
+     *                requests rather than unenforced ones.
+     *
+     *                This is the second of two independent controls. The first
+     *                is ours and could be defeated by a bug in our code; this
+     *                one is the browser's and cannot. Do not add a model
+     *                provider's origin: calling one directly means the API key
+     *                is in the client, which Security.md section 2 rules out.
      *
      *  frame-ancestors 'none'  nothing may embed our pages. Chrome already
      *                blocks this for non-web-accessible resources, so this is
@@ -166,8 +200,8 @@ export default defineConfig({
         "script-src 'self'",
         "object-src 'self'",
         mode === 'production'
-          ? "connect-src 'self'"
-          : "connect-src 'self' ws://localhost:* http://localhost:*",
+          ? connectSrc(["'self'"])
+          : connectSrc(["'self'", 'ws://localhost:*', 'http://localhost:*']),
         "frame-ancestors 'none'",
         "base-uri 'none'",
         "form-action 'none'",
