@@ -22,7 +22,8 @@
     "test:coverage": "vitest run --coverage",
     "check": "npm run compile && npm run test",
     "audit:ship": "npm audit --omit=dev --audit-level=high",
-    "verify": "npm run compile && npm run test && npm run audit:ship"
+    "verify": "npm run compile && npm run test && npm run audit:ship",
+    "test:e2e": "npm run build && playwright test"
   },
   "dependencies": {
     "pdfjs-dist": "^6.3.289",
@@ -31,6 +32,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",

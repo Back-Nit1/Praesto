@@ -174,6 +174,17 @@ what it knows.
    response to an answer must not be answered without the user seeing it - but
    it does mean an extra click on a conditional form.
 7. **English-only aliases.**
+8. **The end-to-end tests run against our own fixtures.** They use a real
+   browser, the real build and the real message pipeline, so they catch a
+   rejected manifest, an unregistered worker or a fill that never lands - but
+   the pages are ours. An anonymised capture of a real Greenhouse, Lever, Ashby
+   and Workday application is the next thing worth adding, and every real-world
+   failure should become a saved fixture and a failing test before it is fixed.
+9. **The end-to-end suite grants host permission statically.** `activeTab` is
+   granted by a click on the toolbar icon, which is browser chrome and cannot
+   be automated, so the test copy of the build is given host access to the
+   fixture server. The permission FLOW - a lapsed grant, a per-origin request -
+   is therefore covered only by the panel's jsdom tests.
 
 ---
 
@@ -199,9 +210,11 @@ each would have been near-invisible in production:
 ## Next recommended task
 
 **Test against real Greenhouse and Lever applications.** Every layer the spec
-asks for before this point now exists and is covered by tests, but every test so
-far runs against markup *we* wrote. The fixtures encode what we believe real
-forms look like; only a real form can tell us where that belief is wrong.
+asks for now exists, is covered by unit tests, and is exercised end-to-end in a
+real Chromium (`npm run test:e2e` - the built extension, its service worker,
+`chrome.scripting` injection and a live DOM). But those fixtures are still
+markup *we* wrote. They encode what we believe real forms look like; only a
+real form can tell us where that belief is wrong.
 
 The method matters more than the finding: each failure becomes a fixture and a
 failing test before anything is changed, and the fix goes into the generic

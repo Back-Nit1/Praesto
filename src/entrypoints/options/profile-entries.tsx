@@ -308,7 +308,7 @@ export function EmploymentEntry({
         applicant knows and what forms ask. It also drives which job is offered
         as "current employer", which is a stronger signal than any date parse.
       */}
-      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] transition hover:border-[var(--app-border-strong)]">
+      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3 py-2.5 text-sm text-[var(--ink)] transition hover:border-[var(--rule-2)]">
         <input
           type="checkbox"
           checked={current}
@@ -422,7 +422,7 @@ export function DateField({
         {...(hint !== undefined ? { hint } : {})}
       />
       {readback !== undefined && (
-        <span className="mt-1.5 block text-[11px] text-[--app-muted]">
+        <span className="mt-1.5 block text-[11px] text-[var(--ink-2)]">
           {readback}
           {parsed?.ambiguousDayMonth === true && ' - this could be read two ways; add the month name'}
         </span>
@@ -508,7 +508,7 @@ export function TextAreaField({
 }): ReactNode {
   return (
     <label className="block">
-      <span className="mb-1 flex items-center gap-2 text-sm text-[--app-text]">
+      <span className="mb-1 flex items-center gap-2 text-sm text-[var(--ink)]">
         <StateBadge state={state} />
         <span className="font-medium">{label}</span>
       </span>
@@ -516,10 +516,10 @@ export function TextAreaField({
         value={value}
         rows={3}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-y rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm text-[--app-text] outline-none transition placeholder:text-[--app-faint] hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:bg-[var(--app-panel)] focus:ring-4 focus:ring-indigo-500/8"
+        className="w-full resize-y rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3 py-2.5 text-sm text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-3)] hover:border-[var(--rule-2)] focus:border-[var(--ink)] focus:bg-[var(--paper)]"
       />
       {hint !== undefined && (
-        <span className="mt-1.5 block text-[11px] leading-relaxed text-[--app-muted]">{hint}</span>
+        <span className="mt-1.5 block text-[11px] leading-relaxed text-[var(--ink-2)]">{hint}</span>
       )}
     </label>
   );
@@ -561,16 +561,16 @@ export function EntryCard({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3.5 transition hover:border-[var(--app-border-strong)]">
+    <div className="rounded-2xl border border-[var(--rule)] bg-[var(--paper-2)] p-3.5 transition hover:border-[var(--rule-2)]">
       <div className="flex items-center justify-between gap-2">
         {lead}
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm font-semibold text-[--app-text]"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm font-semibold text-[var(--ink)]"
           aria-expanded={open}
         >
-          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--app-accent-soft)] text-xs text-[--app-accent]" aria-hidden="true">
+          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--paper-2)] text-xs text-[var(--ink)]" aria-hidden="true">
             {open ? '−' : '+'}
           </span>
           <span className="truncate">{title}</span>
@@ -579,14 +579,14 @@ export function EntryCard({
           <button
             type="button"
             onClick={onRemove}
-            className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-[--app-danger] transition hover:bg-red-500/8"
+            className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-[var(--danger)] transition hover:bg-[var(--danger-wash)]"
           >
             {removeLabel}
           </button>
         )}
       </div>
       {note}
-      {open && <div className="mt-4 space-y-3.5 border-t border-[var(--app-border)] pt-4">{children}</div>}
+      {open && <div className="mt-4 space-y-3.5 border-t border-[var(--rule)] pt-4">{children}</div>}
     </div>
   );
 }
@@ -596,7 +596,7 @@ export function AddButton({ label, onClick }: { label: string; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--app-border-strong)] bg-[var(--app-panel-soft)] px-3 py-2.5 text-sm font-semibold text-[--app-accent] transition hover:border-[var(--app-accent)] hover:bg-[var(--app-accent-soft)]"
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--rule-2)] bg-[var(--paper-2)] px-3 py-2.5 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--ink)] hover:bg-[var(--paper-2)]"
     >
       <span className="text-base leading-none" aria-hidden="true">+</span>
       {label}

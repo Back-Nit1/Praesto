@@ -46,6 +46,15 @@ export const STORES = {
 export type StoreName = (typeof STORES)[keyof typeof STORES];
 
 /**
+ * The audit store's time index.
+ *
+ * Named here rather than as a string literal at each call site because a typo
+ * in an index name is not a compile error - it is a `NotFoundError` thrown at
+ * runtime, inside a transaction, on a user's machine.
+ */
+export const AUDIT_TIMESTAMP_INDEX = 'byTimestamp';
+
+/**
  * Open (and if necessary upgrade) the database.
  *
  * Wrapping the event-based IDB API in a promise once, here, means no other
@@ -73,7 +82,7 @@ function openDatabase(): Promise<IDBDatabase> {
         const audits = db.createObjectStore(STORES.audits, { keyPath: 'id' });
         // Indexed by timestamp so the retention job can delete a date range
         // with a cursor instead of loading every record to filter in memory.
-        audits.createIndex('byTimestamp', 'timestamp', { unique: false });
+        audits.createIndex(AUDIT_TIMESTAMP_INDEX, 'timestamp', { unique: false });
       }
     };
 
@@ -202,6 +211,100 @@ export class IndexedDbCollection<T extends { id: string }> {
             return;
           }
           out.push(cursor.value as T);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+      return out;
+    });
+  }
+
+
+  /**
+   * Write several records in ONE transaction.
+   *
+   * Not a loop over `put`: each `put` above opens its own connection and its
+   * own transaction, so writing a 30-field audit run that way would open thirty
+   * connections and could half-succeed - leaving a run in history with a third
+   * of its fields missing and no way to tell that is what happened.
+   */
+  async putMany(records: readonly T[]): Promise<Result<void, AppError>> {
+    if (records.length === 0) return ok(undefined);
+    return withStore(this.storeName, 'readwrite', async (store) => {
+      // Requests are queued on the transaction and awaited together; the
+      // transaction's own completion (checked by `withStore`) is what decides
+      // whether the batch actually landed.
+      await Promise.all(records.map((record) => fromRequest(store.put(record))));
+    });
+  }
+
+  /** Delete several records in one transaction. Same reasoning as `putMany`. */
+  async deleteMany(ids: readonly string[]): Promise<Result<void, AppError>> {
+    if (ids.length === 0) return ok(undefined);
+    return withStore(this.storeName, 'readwrite', async (store) => {
+      await Promise.all(ids.map((id) => fromRequest(store.delete(id))));
+    });
+  }
+
+  /** Remove everything in the store. The "delete my history" primitive. */
+  async clear(): Promise<Result<void, AppError>> {
+    return withStore(this.storeName, 'readwrite', async (store) => {
+      await fromRequest(store.clear());
+    });
+  }
+
+  /**
+   * List by an INDEX rather than by primary key, newest first, capped.
+   *
+   * `list` above walks the primary key, which for a keyPath like
+   * `${runId}:${localId}` is an arbitrary order that merely looks sorted. A
+   * history view walking that would show last month's application above this
+   * morning's. Anything time-ordered must come through here.
+   */
+  async listByIndex(indexName: string, limit: number): Promise<Result<T[], AppError>> {
+    return withStore(this.storeName, 'readonly', async (store) => {
+      const out: T[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const request = store.index(indexName).openCursor(null, 'prev');
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor === null || out.length >= limit) {
+            resolve();
+            return;
+          }
+          out.push(cursor.value as T);
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+      return out;
+    });
+  }
+
+  /**
+   * Walk an index newest-first, keeping only a projection of each record.
+   *
+   * Retention needs to see EVERY row to decide what to drop, and the whole
+   * point of this store is that we never materialise every row. The projection
+   * is the compromise: the cursor visits each record, but only three short
+   * strings per row are retained, so the peak allocation is kilobytes for a
+   * history that is megabytes on disk.
+   */
+  async projectByIndex<R>(
+    indexName: string,
+    project: (record: T) => R,
+  ): Promise<Result<R[], AppError>> {
+    return withStore(this.storeName, 'readonly', async (store) => {
+      const out: R[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const request = store.index(indexName).openCursor(null, 'prev');
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor === null) {
+            resolve();
+            return;
+          }
+          out.push(project(cursor.value as T));
           cursor.continue();
         };
         request.onerror = () => reject(request.error);

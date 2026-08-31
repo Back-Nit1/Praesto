@@ -34,5 +34,5 @@
       "@backend/*": ["./src/packages/backend/*"]
     }
   },
-  "include": ["src", "tests", "fixtures", "*.config.ts"]
+  "include": ["src", "tests", "e2e", "fixtures", "*.config.ts"]
 }

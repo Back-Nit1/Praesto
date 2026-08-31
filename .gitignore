@@ -30,3 +30,7 @@ engineering.md
 # threat model and the map of every trust boundary, and this repository may not
 # stay private. Keep it beside the code, share it deliberately.
 Security.md
+
+# Playwright output
+test-results/
+playwright-report/

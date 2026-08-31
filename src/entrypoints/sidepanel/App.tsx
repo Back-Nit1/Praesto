@@ -750,15 +750,17 @@ export function App(): ReactNode {
           <BrandMark small />
           <div className="min-w-0">
             <h1 className="panel-product-name">Application Agent</h1>
-        {/* The destination, stated plainly. This panel can hand a resume and a
-            home address to whatever page is in front of it, so the user should
-            never have to guess which site that is. */}
+            {/* The destination, stated plainly, in the data face. This panel
+                can hand a resume and a home address to whatever page is in
+                front of it, so the site you are about to hand them to is your
+                data, not our prose - you should be able to read it character
+                by character without deciding to. */}
             {targetHost !== undefined ? (
-              <p className="panel-host truncate" title={targetHost}>
-                <span className="truncate">{targetHost}</span>
+              <p className="data mt-0.5 truncate text-[10.5px] text-[var(--ink-2)]" title={targetHost}>
+                {targetHost}
               </p>
             ) : (
-              <p className="mt-0.5 text-[10px] text-[--app-muted]">Private application copilot</p>
+              <p className="mt-0.5 text-[10.5px] text-[var(--ink-2)]">Nothing leaves this browser</p>
             )}
           </div>
         </div>
@@ -769,46 +771,40 @@ export function App(): ReactNode {
           aria-label="Edit your profile"
           title="Edit your profile"
         >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" />
           </svg>
         </button>
       </header>
 
       {state.kind === 'idle' && (
-        <div className="panel-hero">
-          <div className="panel-hero-icon">
-            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3" /><circle cx="12" cy="12" r="3.5" /><path d="m14.7 14.7 2.6 2.6" />
-            </svg>
-          </div>
-          <div className="relative z-10">
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.15em] text-[--app-accent]">
-              Ready when you are
-            </div>
-            <h2 className="text-xl font-semibold tracking-[-0.035em] text-[--app-text]">
-              Turn this form into a review list.
-            </h2>
-            <p className="mb-5 mt-2 text-xs leading-relaxed text-[--app-muted]">
-              We’ll read the visible questions, prepare only confident answers, and leave everything else for you.
-            </p>
-            <Button className="w-full" onClick={() => void handleScan()} disabled={busy}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg>
-              Scan this page
-            </Button>
-            <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-[--app-muted]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-teal)]" />
-              Nothing is filled without your click
-            </div>
-          </div>
+        <div className="panel-card p-4">
+          <h2 className="text-[15px] font-semibold tracking-[-0.025em]">Read this application</h2>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--ink-2)]">
+            Every question on the page is matched against your profile. Answers we can stand behind
+            get prepared; anything we are unsure of is listed for you and left blank.
+          </p>
+          <Button className="mt-4 w-full" onClick={() => void handleScan()} disabled={busy}>
+            Scan this page
+          </Button>
+          {/* Two promises, made where they are relevant rather than in a badge
+              at the top of the panel. They are the reason it is safe to let
+              this run on a real application. */}
+          <p className="mt-3 text-[10.5px] leading-relaxed text-[var(--ink-3)]">
+            Nothing is filled until you click. Nothing is ever submitted.
+          </p>
         </div>
       )}
 
       {state.kind === 'scanning' && (
-        <div className="panel-card px-5 py-7 text-center">
-          <div className="scan-orbit" aria-hidden="true" />
-          <p className="font-semibold text-[--app-text]">Reading the form…</p>
-          <p className="mt-1 text-[11px] text-[--app-muted]">Finding questions and matching verified answers</p>
+        <div className="panel-card px-5 py-6 text-center" role="status" aria-live="polite">
+          <div className="scan-lines" aria-hidden="true">
+            <span /><span /><span /><span />
+          </div>
+          <p className="text-[13px] font-medium">Reading the form</p>
+          <p className="mt-1 text-[11px] text-[var(--ink-2)]">
+            Matching each question against your profile
+          </p>
         </div>
       )}
 
@@ -825,7 +821,14 @@ export function App(): ReactNode {
       <StatusLine status={status} />
 
       {pageChanged && state.kind === 'scanned' && (
-        <div className="my-3 rounded-xl border border-amber-500/20 bg-amber-500/8 p-3 text-xs text-[--app-warning]">
+        <div
+          className="my-3 rounded-lg border p-3 text-xs"
+          style={{
+            color: 'var(--s-review)',
+            background: 'var(--s-review-wash)',
+            borderColor: 'var(--s-review-line)',
+          }}
+        >
           <p className="mb-2 font-medium">This form changed. There may be new questions.</p>
           <Button variant="secondary" className="w-full" onClick={() => void handleScan()} disabled={busy}>
             Rescan
@@ -941,7 +944,7 @@ function EmbeddedFormPrompt({
   onGranted: () => void;
 }): ReactNode {
   return (
-    <div className="my-2 rounded border border-blue-300 bg-blue-50/60 p-3 text-xs dark:border-blue-900 dark:bg-blue-950/30">
+    <div className="my-2 rounded border border-[var(--rule)] bg-[var(--paper-2)] p-3 text-xs border-[var(--rule)] bg-[var(--paper-2)]">
       <p className="mb-2">
         Part of this page is loaded from another site. Chrome needs your permission before the
         extension can read the form inside it.
@@ -1014,15 +1017,14 @@ function ScanError({
     return (
       <div className="panel-card overflow-hidden p-4">
         <div className="mb-3 flex items-start gap-3">
-          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-[--app-warning]">
+          <span className="grid h-8 w-8 flex-none place-items-center rounded-lg border border-[var(--s-review-line)] bg-[var(--s-review-wash)] text-[var(--s-review)]">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v4M5.6 5.6l2.8 2.8M3 12h4M18.4 5.6l-2.8 2.8" /><path d="M8 16a4 4 0 1 1 8 0v2H8z" /></svg>
           </span>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-warning]">Permission needed</p>
-            <p className="mt-1 font-semibold tracking-[-0.015em] text-[--app-text]">Allow access to {host}?</p>
-          </div>
+          <p className="text-[14px] font-semibold tracking-[-0.02em] text-[var(--ink)]">
+            Allow access to <span className="data">{host}</span>?
+          </p>
         </div>
-        <p className="text-xs leading-relaxed text-[--app-muted]">
+        <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           The extension asks for no site access when you install it, so it has none here yet.
           Allowing {host} lets it read this form. It does not grant access to any other site, and
           you can undo it from Chrome&apos;s extension settings at any time.
@@ -1050,15 +1052,14 @@ function ScanError({
     return (
       <div className="panel-card overflow-hidden p-4">
         <div className="mb-3 flex items-start gap-3">
-          <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-[--app-accent]">
+          <span className="grid h-8 w-8 flex-none place-items-center rounded-lg border border-[var(--rule)] bg-[var(--paper-2)] text-[var(--ink)]">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.6-4 2.8-6 6.5-6s5.9 2 6.5 6" /></svg>
           </span>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-accent]">One-time setup</p>
-            <p className="mt-1 font-semibold tracking-[-0.015em] text-[--app-text]">Build your application profile</p>
-          </div>
+          <p className="text-[14px] font-semibold tracking-[-0.02em] text-[var(--ink)]">
+            Build your application profile
+          </p>
         </div>
-        <p className="text-xs leading-relaxed text-[--app-muted]">
+        <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           The extension has nothing to fill this form with yet. Add your details - or import a
           resume - and it will take about two minutes, once.
         </p>
@@ -1070,10 +1071,12 @@ function ScanError({
   return (
     <div className="panel-card p-4">
       <div className="flex items-start gap-3">
-        <span className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-red-500/20 bg-red-500/10 text-[--app-danger]">!</span>
+        <span className="grid h-8 w-8 flex-none place-items-center rounded-lg border border-[var(--danger-line)] bg-[var(--danger-wash)] text-[var(--danger)]">!</span>
         <div className="min-w-0">
-          <p className="font-semibold text-[--app-text]">We couldn’t read this page</p>
-          <p className="mt-1 text-xs leading-relaxed text-[--app-muted]">{message}</p>
+          <p className="text-[14px] font-semibold tracking-[-0.02em] text-[var(--ink)]">
+            This page could not be read
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--ink-2)]">{message}</p>
         </div>
       </div>
       <Button className="mt-4 w-full" variant="secondary" onClick={() => void onRetry()} disabled={busy}>
@@ -1121,19 +1124,29 @@ function ScanReport({
   const remainingReady = ready.filter((action) => outcomes[action.localId] === undefined);
 
   if (actions.length === 0) {
+    /*
+      An empty result is a direction, not a shrug. The two cases are genuinely
+      different - we found no form at all, or we found one and understood none
+      of it - and only the second one is a reason to add something to your
+      profile, so only the second one offers that.
+    */
+    const foundNothing = fieldsDetected === 0;
     return (
-      <div className="panel-card p-5 text-center">
-        <span className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] text-[--app-muted]">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3" /><path d="M9 12h6" /></svg>
-        </span>
-        <p className="text-xs leading-relaxed text-[--app-muted]">
-          {fieldsDetected === 0
-            ? 'No application form detected on this page.'
-            : `${fieldsDetected} fields found, but none of them matched anything in your profile.`}
+      <div className="panel-card p-4">
+        <p className="text-[14px] font-semibold tracking-[-0.02em]">
+          {foundNothing ? 'No application form detected' : 'Nothing here matched your profile'}
         </p>
-        <Button className="mt-4 w-full" variant="secondary" onClick={onRescan} disabled={busy}>
-          Scan again
-        </Button>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-[var(--ink-2)]">
+          {foundNothing
+            ? 'This page has no fields we recognise as an application. If the form is behind a button or a later step, open it and scan again.'
+            : `${fieldsDetected} fields found, and none of them matched anything you have saved. Add the missing details to your profile, then scan again.`}
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="secondary" onClick={onRescan} disabled={busy}>
+            Scan again
+          </Button>
+          <Button onClick={() => void chrome.runtime.openOptionsPage()}>Open my profile</Button>
+        </div>
       </div>
     );
   }
@@ -1141,32 +1154,69 @@ function ScanReport({
   const verifiedCount = Object.values(outcomes).filter((outcome) => outcome.verified).length;
   const failedCount = Object.values(outcomes).length - verifiedCount;
 
+  /**
+   * THE CERTAINTY LEDGER.
+   *
+   * One bar, segmented in proportion to what the scan actually found, and a
+   * key beneath it. It replaced a grid of four to six equal metric cards - a
+   * layout that gave "fields detected", a number nobody acts on, exactly the
+   * same weight as "needs your review", which is a to-do list, and that grew
+   * by two cards after a fill and pushed everything below it down the panel.
+   *
+   * A proportional bar cannot flatter the result. If four fields out of
+   * nineteen were understood, the grey runs three quarters of the width and
+   * you see that before reading a word. An extension whose entire promise is
+   * that it will admit what it does not know should draw its ignorance at
+   * full size.
+   *
+   * Only non-empty buckets are drawn, so the bar never shows a state this
+   * page does not actually have.
+   */
+  const buckets = [
+    { key: 'verified', label: 'Filled and verified', count: verifiedCount, colour: 'var(--s-verified)' },
+    { key: 'failed', label: 'Could not be filled', count: failedCount, colour: 'var(--danger)' },
+    { key: 'ready', label: 'Ready to fill', count: remainingReady.length, colour: 'var(--s-confident)' },
+    { key: 'review', label: 'Needs your review', count: review.length, colour: 'var(--s-review)' },
+    { key: 'unknown', label: 'Left blank', count: skipped.length, colour: 'var(--s-unknown)' },
+  ].filter((bucket) => bucket.count > 0);
+
   return (
-    <div className="space-y-3.5">
-      <div className="flex items-end justify-between gap-3 px-0.5">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[--app-accent]">Application map</p>
-          <h2 className="mt-1 text-lg font-semibold tracking-[-0.035em] text-[--app-text]">Your review queue</h2>
+    <div className="space-y-3">
+      <section className="panel-card p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-[13px] font-semibold tracking-[-0.015em]">What we found</h2>
+          <span className="data text-[11px] text-[var(--ink-2)]">
+            {fieldsDetected} fields detected
+          </span>
         </div>
-        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2 py-1 text-[10px] font-semibold text-[--app-success]">Scan complete</span>
-      </div>
 
-      <dl className="metric-grid">
-        <Stat label="Fields detected" value={fieldsDetected} />
-        <Stat label="Ready to fill" value={ready.length} />
-        <Stat label="Need review" value={review.length} />
-        <Stat label="Not recognised" value={skipped.length} />
-        {/* Only shown once a fill has run, and always shows BOTH numbers. */}
-        {Object.keys(outcomes).length > 0 && (
-          <>
-            <Stat label="Filled and verified" value={verifiedCount} />
-            <Stat label="Could not be filled" value={failedCount} />
-          </>
-        )}
-      </dl>
+        {/* The bar is aria-hidden because the key below it is the same
+            information as text, and a screen reader should hear it once. */}
+        <div className="ledger mt-3" aria-hidden="true">
+          {buckets.map((bucket) => (
+            <span
+              key={bucket.key}
+              className="ledger-seg"
+              style={{ flex: bucket.count, background: bucket.colour }}
+            />
+          ))}
+        </div>
 
-      <div className="panel-card p-3">
-        <Button className="w-full" onClick={() => onFill(remainingReady)} disabled={busy || remainingReady.length === 0}>
+        <dl className="ledger-key">
+          {buckets.map((bucket) => (
+            <div key={bucket.key} className="ledger-key-item">
+              <span className="ledger-key-dot" style={{ background: bucket.colour }} aria-hidden="true" />
+              <dd className="ledger-count">{bucket.count}</dd>
+              <dt>{bucket.label}</dt>
+            </div>
+          ))}
+        </dl>
+
+        <Button
+          className="mt-4 w-full"
+          onClick={() => onFill(remainingReady)}
+          disabled={busy || remainingReady.length === 0}
+        >
           {remainingReady.length === 0 && attempted(ready).length > 0
             ? 'Safe fields done'
             : `Fill ${remainingReady.length} safe field${remainingReady.length === 1 ? '' : 's'}`}
@@ -1174,14 +1224,14 @@ function ScanReport({
         <Button className="mt-2 w-full" variant="ghost" onClick={onRescan} disabled={busy}>
           Rescan
         </Button>
-      </div>
 
-      {/* The form is never submitted for the user. Saying so plainly is part of
-          the product: it is why they can let it fill without watching. */}
-      <p className="flex items-start gap-2 px-1 text-[10px] leading-relaxed text-[--app-muted]">
-        <svg className="mt-px flex-none text-[--app-teal]" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8 7 10 4.2-2 7-5.4 7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>
-        <span>This extension never submits an application. Review everything before you do.</span>
-      </p>
+        {/* The form is never submitted for the user. Saying so where the fill
+            button is, rather than in a badge at the top, is part of the
+            product: it is why they can let it fill without watching. */}
+        <p className="mt-3 text-[10.5px] leading-relaxed text-[var(--ink-3)]">
+          This extension never submits an application. Read it through before you do.
+        </p>
+      </section>
 
       {review.length > 0 && (
         <ActionGroup
@@ -1207,17 +1257,27 @@ function ScanReport({
       )}
       {ready.length > 0 && (
         <ActionGroup
-          title="Ready"
+          title="Ready to fill"
           actions={ready}
           outcomes={outcomes}
           onFill={onFill}
           onCorrect={onCorrect}
           busy={busy}
+          /* CLOSED BY DEFAULT, AND THAT IS THE PRODUCT.
+             The promise is that you can stop reading the fields it is sure
+             about. Opening this list by default would contradict that on every
+             scan, and it would push the three fields that DO need you off the
+             bottom of a 400 px panel. */
+          collapsed
+          /* Unless something went wrong. A failure is only actionable if you
+             can see which field it was, so a failed fill opens the group that
+             contains it whether or not the user had it closed. */
+          forceOpen={failedCount > 0}
         />
       )}
       {skipped.length > 0 && (
         <ActionGroup
-          title="Left alone"
+          title="Left blank"
           actions={skipped}
           outcomes={outcomes}
           onFill={onFill}
@@ -1230,21 +1290,13 @@ function ScanReport({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }): ReactNode {
-  return (
-    <div className="metric-card">
-      <dt className="metric-label">{label}</dt>
-      <dd className="metric-value">{value}</dd>
-    </div>
-  );
-}
-
 function ActionGroup({
   title,
   actions,
   outcomes,
   busy,
   collapsed = false,
+  forceOpen,
   bulkAction,
   onFill,
   onCorrect,
@@ -1254,30 +1306,56 @@ function ActionGroup({
   outcomes: Record<string, FieldFillReport>;
   busy: boolean;
   collapsed?: boolean;
+  /** Open the group regardless of `collapsed`, until the user says otherwise. */
+  forceOpen?: boolean;
   bulkAction?: { label: string; actions: ResolvedFieldAction[] };
   onFill: (actions: ResolvedFieldAction[]) => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
 }): ReactNode {
-  const [open, setOpen] = useState(!collapsed);
+  /**
+   * `undefined` until the user touches the disclosure, and only then does
+   * their choice win. Holding the open state as a plain boolean seeded from a
+   * prop meant a group could never re-open itself: a fill that failed inside a
+   * collapsed "Ready to fill" left the user with a red count in the ledger and
+   * no way to find out which field it belonged to without guessing.
+   */
+  const [choice, setChoice] = useState<boolean | undefined>(undefined);
+  const open = choice ?? (!collapsed || forceOpen === true);
 
   return (
-    <section className="action-card overflow-hidden">
+    <section className="panel-card overflow-hidden">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between px-3 py-3 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-[--app-muted] transition hover:bg-[var(--app-panel)]"
+        onClick={() => setChoice(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[var(--paper-2)]"
         aria-expanded={open}
       >
-        <span>
-          {title} ({actions.length})
+        <span
+          className="grid h-4 w-4 flex-none place-items-center text-[var(--ink-3)]"
+          aria-hidden="true"
+        >
+          <svg
+            viewBox="0 0 12 12"
+            width="9"
+            height="9"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 140ms ease' }}
+          >
+            <path d="m4 2 4 4-4 4" />
+          </svg>
         </span>
-        <span className="grid h-5 w-5 place-items-center rounded-md bg-[var(--app-panel)] text-sm font-medium text-[--app-accent]" aria-hidden="true">{open ? '−' : '+'}</span>
+        <span className="text-[12px] font-semibold tracking-[-0.005em]">{title}</span>
+        <span className="data ml-auto text-[11px] text-[var(--ink-2)]">{actions.length}</span>
       </button>
 
       {open && (
         <>
           {bulkAction !== undefined && bulkAction.actions.length > 0 && (
-            <div className="border-t border-[var(--app-border)] px-3 py-2.5">
+            <div className="border-t border-[var(--rule)] px-3 py-2.5">
               <Button
                 variant="secondary"
                 className="w-full"
@@ -1293,7 +1371,7 @@ function ActionGroup({
               </Button>
             </div>
           )}
-          <ul className="border-t border-[var(--app-border)]">
+          <ul className="border-t border-[var(--rule)]">
             {actions.map((action) => (
               <ActionRow
                 key={action.localId}
@@ -1372,31 +1450,54 @@ function ActionRow({
   const canAccept = action.action === 'suggest' && outcome === undefined;
   const canEditValue = canAccept && action.optionValue === undefined && action.value !== undefined;
 
-  return (
-    <li className="border-b border-[var(--app-border)] px-3 py-3 text-xs last:border-b-0">
-      <div className="flex items-start gap-2.5">
-        <StateBadge state={state} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium text-[--app-text]">{action.explanation ?? 'Field'}</span>
-          {action.value !== undefined && (
-            <span className="mt-0.5 block truncate font-mono text-[10px] text-[--app-muted]">{String(action.value)}</span>
-          )}
-          {/* The failure REASON, in the row that failed. A user who is told
-              only "2 could not be filled" has to guess which two. */}
-          {outcome !== undefined && !outcome.verified && (
-            <span className="mt-1 block text-[10px] leading-snug text-[--app-warning]">
-              {describeFillFailure(outcome.failureReason)}
-            </span>
-          )}
-        </span>
+  const value = action.value === undefined ? undefined : String(action.value);
 
-        <div className="flex shrink-0 flex-col items-end gap-1">
+  return (
+    <li className={`field-row field-row--${state}`}>
+      <div className="flex items-start gap-2.5">
+        <div className="min-w-0 flex-1">
+          {/*
+            THE ANSWER IS THE HEADLINE, NOT THE QUESTION.
+
+            This row used to set the question in bold 12 px and the value in
+            10 px muted monospace underneath it. That is backwards. The user
+            already knows what an application asks for; what they are here to
+            check is the string that is about to be typed into it on their
+            behalf. So the value is the largest and darkest thing in the row
+            and the field name is its caption.
+          */}
+          <span className="field-label">{rowTitle(action)}</span>
+          {value !== undefined ? (
+            <span className="field-value" title={value}>
+              {value}
+            </span>
+          ) : (
+            <span className="field-value text-[var(--ink-3)]">—</span>
+          )}
+        </div>
+        <StateBadge state={state} />
+      </div>
+
+      <div className="mt-1.5 flex items-end justify-between gap-2">
+        {/*
+          WHERE THIS ANSWER CAME FROM.
+
+          `knowledgeState` - the five-way distinction the README calls the
+          heart of the product - was already computed by the mapper, already
+          travelled to the panel on every action, and was already thrown away
+          unread. Showing it is the difference between "trust us" and "here is
+          why". A row that says "You corrected this before" is a row the user
+          can audit.
+        */}
+        <span className="field-provenance">{describeProvenance(action, outcome)}</span>
+
+        <span className="flex flex-none items-center gap-1.5">
           {canAccept && (
             <button
               type="button"
               onClick={() => onFill([asAcceptedFill(action)])}
               disabled={busy}
-              className="rounded-md bg-indigo-500/10 px-2 py-1 text-[10px] font-semibold text-[--app-accent] transition hover:bg-indigo-500/15 disabled:opacity-50"
+              className="rounded-md border border-[var(--rule)] bg-[var(--paper-2)] px-2 py-1 text-[10.5px] font-semibold text-[var(--ink)] transition-colors hover:border-[var(--rule-2)] disabled:opacity-40"
             >
               Fill this
             </button>
@@ -1404,25 +1505,27 @@ function ActionRow({
           <button
             type="button"
             onClick={() => setEditing((current) => !current)}
-            className="px-1 py-0.5 text-[10px] font-semibold text-[--app-muted] transition hover:text-[--app-text]"
+            className="px-1 py-1 text-[10.5px] font-semibold text-[var(--ink-2)] transition-colors hover:text-[var(--ink)]"
             aria-expanded={editing}
           >
             {editing ? 'Cancel' : 'Change'}
           </button>
-        </div>
+        </span>
       </div>
 
       {editing && (
-        <div className="mt-3 space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
+        <div className="mt-2.5 space-y-3 rounded-lg border border-[var(--rule)] bg-[var(--paper-2)] p-3">
           {canEditValue && (
             <label className="block">
-              <span className="mb-1.5 block font-medium text-[--app-muted]">Use this value</span>
-              <div className="flex gap-1">
+              <span className="mb-1.5 block text-[11px] font-medium text-[var(--ink-2)]">
+                Use this value
+              </span>
+              <div className="flex gap-1.5">
                 <input
                   type="text"
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-1.5 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
+                  className="data min-w-0 flex-1 rounded-md border border-[var(--rule)] bg-[var(--paper)] px-2 py-1.5 text-[12px] outline-none focus:border-[var(--ink)]"
                 />
                 <Button
                   onClick={() => {
@@ -1448,6 +1551,60 @@ function ActionRow({
       )}
     </li>
   );
+}
+
+/**
+ * What this row is about, in the user's vocabulary.
+ *
+ * Prefers the canonical profile field over `explanation`, which for a mapped
+ * field reads "Email address (autocomplete)" - the parenthetical being the
+ * matching signal that fired. That is mapping metadata, and spec section 22 is
+ * explicit that it belongs in the options-page playground, not here. The
+ * explanation is still used verbatim where there is no profile path, because
+ * those strings ("Resume upload", "A file is already attached") are written
+ * for a person.
+ */
+function rowTitle(action: ResolvedFieldAction): string {
+  if (action.profilePath !== null) return labelForPath(action.profilePath);
+  return action.explanation ?? 'Field';
+}
+
+/**
+ * One line saying where this answer came from, or why there isn't one.
+ *
+ * Once a fill has run the OUTCOME is the only honest answer: a value we were
+ * certain about, which the page then rejected, did not come from anywhere -
+ * it is not on the page at all.
+ */
+function describeProvenance(
+  action: ResolvedFieldAction,
+  outcome: FieldFillReport | undefined,
+): string {
+  if (outcome !== undefined) {
+    return outcome.verified
+      ? 'Filled, and read back from the page to confirm'
+      : describeFillFailure(outcome.failureReason);
+  }
+
+  // A skipped field's explanation already says WHY it was left alone ("Your
+  // profile has no phone number"), which is more use than naming the
+  // knowledge state that produced it.
+  if (action.action === 'skip') return action.explanation ?? 'Left blank';
+
+  if (action.action === 'attach_resume') return 'Your saved resume will be attached';
+
+  switch (action.knowledgeState) {
+    case 'known':
+      return 'You entered this yourself';
+    case 'derived':
+      return 'Worked out from what you entered';
+    case 'previously_seen':
+      return 'You have answered this question before';
+    case 'probable':
+      return 'Our best reading of the question - check it before filling';
+    case 'unknown':
+      return 'Not recognised';
+  }
 }
 
 /**
@@ -1599,11 +1756,11 @@ function CorrectionPicker({
   return (
     <div className="space-y-2">
       <label className="block">
-        <span className="mb-1.5 block font-medium text-[--app-muted]">This question is asking for</span>
+        <span className="mb-1.5 block font-medium text-[var(--ink-2)]">This question is asking for</span>
         <select
           value={path}
           onChange={(event) => setPath(event.target.value)}
-          className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-2 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
+          className="w-full rounded-lg border border-[var(--rule)] bg-[var(--paper-2)] px-2 py-2 text-xs outline-none focus:border-[var(--ink)]"
         >
           {/* "Nothing" is a real, useful answer: it teaches the extension to
               stop offering this field, which is itself a correction worth
@@ -1622,11 +1779,11 @@ function CorrectionPicker({
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block font-medium text-[--app-muted]">Remember this</span>
+        <span className="mb-1.5 block font-medium text-[var(--ink-2)]">Remember this</span>
         <select
           value={scope}
           onChange={(event) => setScope(event.target.value as MappingScope)}
-          className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-2 py-2 text-xs outline-none focus:border-[var(--app-accent)] focus:ring-2 focus:ring-indigo-500/10"
+          className="w-full rounded-lg border border-[var(--rule)] bg-[var(--paper-2)] px-2 py-2 text-xs outline-none focus:border-[var(--ink)]"
         >
           {SCOPE_LABELS.map((option) => (
             <option key={option.value} value={option.value}>

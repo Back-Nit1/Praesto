@@ -135,7 +135,7 @@ export function App(): ReactNode {
       <div className="options-shell grid min-h-screen place-items-center">
         <div className="text-center">
           <div className="scan-orbit" aria-hidden="true" />
-          <p className="text-sm text-[--app-muted]">Opening your private workspace…</p>
+          <p className="text-sm text-[var(--ink-2)]">Opening your private workspace…</p>
         </div>
       </div>
     );
@@ -150,10 +150,10 @@ export function App(): ReactNode {
           <div className="mb-8 flex items-center gap-3 px-1">
             <BrandMark />
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.025em] text-[--app-text]">
+              <div className="text-[15px] font-bold tracking-[-0.025em] text-[var(--ink)]">
                 Application Agent
               </div>
-              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--app-muted]">
+              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--ink-2)]">
                 Your private operator
               </div>
             </div>
@@ -169,27 +169,27 @@ export function App(): ReactNode {
                   onClick={() => setTab(candidate)}
                   className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     selected
-                      ? 'bg-[var(--app-accent-soft)] font-semibold text-[--app-accent] shadow-[inset_0_0_0_1px_var(--app-border)]'
-                      : 'text-[--app-muted] hover:bg-[var(--app-panel-soft)] hover:text-[--app-text]'
+                      ? 'bg-[var(--paper-2)] font-semibold text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--rule)]'
+                      : 'text-[var(--ink-2)] hover:bg-[var(--paper-2)] hover:text-[var(--ink)]'
                   }`}
                   aria-current={selected ? 'page' : undefined}
                 >
                   <NavIcon tab={candidate} active={selected} />
                   <span>{TAB_LABELS[candidate]}</span>
-                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--app-accent)]" />}
+                  {selected && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--ink)]" />}
                 </button>
               );
             })}
           </nav>
 
-          <div className="mt-auto rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-4">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[--app-text]">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-[--app-success]">
+          <div className="mt-auto rounded-2xl border border-[var(--rule)] bg-[var(--paper-2)] p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--ink)]">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--s-verified-wash)] text-[var(--s-verified)]">
                 <ShieldIcon />
               </span>
               Private by design
             </div>
-            <p className="text-[11px] leading-relaxed text-[--app-muted]">
+            <p className="text-[11px] leading-relaxed text-[var(--ink-2)]">
               Your profile and resumes stay in this browser. Nothing is sent to a cloud service.
             </p>
           </div>
@@ -208,7 +208,7 @@ export function App(): ReactNode {
                 <Button variant="ghost" onClick={handleExport}>
                   <DownloadIcon /> Export
                 </Button>
-                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3.5 py-2 text-sm font-semibold text-[--app-text] transition hover:border-[var(--app-border-strong)] hover:bg-[var(--app-panel)]">
+                <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3.5 py-2 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--rule-2)] hover:bg-[var(--paper)]">
                   <UploadIcon /> Import
                   <input
                     type="file"

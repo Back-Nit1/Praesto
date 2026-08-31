@@ -419,7 +419,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
       </Section>
 
       <Section title="Education">
-        <p className="text-xs leading-relaxed text-[--app-muted]">
+        <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           Most applications ask about one school. The one with the most recent graduation date is
           the one offered first, so list them in whatever order suits you.
         </p>
@@ -504,7 +504,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           explicitly, and the confidence policy refuses to autofill them from
           anything but a value the user set on this screen.
         */}
-        <p className="text-xs leading-relaxed text-[--app-muted]">
+        <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           These are never guessed from your resume, your name, or where you live. The extension will
           leave them blank on an application until you answer them here.
         </p>
@@ -542,7 +542,7 @@ export function ProfileEditor({ profile, edit }: ProfileEditorProps): ReactNode 
           "Decline to self-identify" is a legitimate answer and is stored,
           matched and filled like any other.
         */}
-        <p className="text-xs leading-relaxed text-[--app-muted]">
+        <p className="text-xs leading-relaxed text-[var(--ink-2)]">
           Entirely optional, and never inferred from anything. Leave any of these blank and the
           extension will leave the matching question on an application blank too. Write your answer
           the way you want it to appear - including "Decline to self-identify".
@@ -605,12 +605,12 @@ function TriStateQuestion({
   ];
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] px-3 py-2.5">
-      <span className="flex items-center gap-2 text-sm font-medium text-[--app-text]">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--rule)] bg-[var(--paper-2)] px-3 py-2.5">
+      <span className="flex items-center gap-2 text-sm font-medium text-[var(--ink)]">
         <StateBadge state={state} />
         {label}
       </span>
-      <div className="flex rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-0.5">
+      <div className="flex rounded-lg border border-[var(--rule)] bg-[var(--paper)] p-0.5">
         {options.map((option) => (
           <button
             key={String(option.value)}
@@ -618,8 +618,8 @@ function TriStateQuestion({
             onClick={() => onChange(option.value)}
             className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
               value === option.value
-                ? 'bg-[var(--app-accent)] text-white shadow-sm'
-                : 'text-[--app-muted] hover:bg-[var(--app-panel-soft)] hover:text-[--app-text]'
+                ? 'bg-[var(--ink)] text-white shadow-sm'
+                : 'text-[var(--ink-2)] hover:bg-[var(--paper-2)] hover:text-[var(--ink)]'
             }`}
             aria-pressed={value === option.value}
           >
