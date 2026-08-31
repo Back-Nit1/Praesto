@@ -16,10 +16,19 @@ import { useState, type ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   EmploymentReview,
+  NO_ENTRIES,
+  applyReviews,
   reviewEntries,
   type EntryReview,
 } from '@/entrypoints/options/ResumeEntryReview';
-import { emptyValue, resumeValue, type Employment, type ProfileValue } from '@profile/schema';
+import {
+  createEmptyProfile,
+  emptyValue,
+  resumeValue,
+  type ApplicantProfile,
+  type Employment,
+  type ProfileValue,
+} from '@profile/schema';
 import type { NormalizedDate } from '@profile/normalizers/date';
 
 const rv = <T,>(value: T, confidence = 0.9): ProfileValue<T> => resumeValue(value, { confidence });
@@ -179,5 +188,57 @@ describe('EmploymentReview', () => {
   it('renders nothing at all when the resume had no jobs in it', () => {
     const { container } = render(<EmploymentReview reviews={[]} onChange={() => undefined} />);
     expect(container.textContent).toBe('');
+  });
+});
+
+describe('applyReviews', () => {
+  const held = job({ id: 'held', location: emptyValue<string>() });
+
+  function profileWith(employment: Employment[]): ApplicantProfile {
+    return { ...createEmptyProfile('test', '2026-01-01T00:00:00.000Z'), employment };
+  }
+
+  it('never lets an unchecked entry reach the profile', () => {
+    const reviews = {
+      ...NO_ENTRIES,
+      employment: [{ ...(reviewEntries('employment', [job({ id: 'parsed' })], [])[0] as EntryReview<Employment>), decision: 'skip' as const }],
+    };
+
+    const result = applyReviews(profileWith([]), reviews);
+    expect(result.profile.employment).toEqual([]);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('merges an update into the entry the profile already holds', () => {
+    const reviews = {
+      ...NO_ENTRIES,
+      employment: [
+        {
+          ...(reviewEntries('employment', [job({ id: 'parsed', location: rv('Remote') })], [held])[0] as EntryReview<Employment>),
+          decision: 'update' as const,
+        },
+      ],
+    };
+
+    const result = applyReviews(profileWith([held]), reviews);
+    expect(result.profile.employment).toHaveLength(1);
+    expect(result.profile.employment[0]?.id).toBe('held');
+    expect(result.profile.employment[0]?.location.value).toBe('Remote');
+    expect(result.updated).toBe(1);
+  });
+
+  it('counts across all three collections at once', () => {
+    const reviews = {
+      ...NO_ENTRIES,
+      employment: reviewEntries('employment', [job({ id: 'a' }), job({ id: 'b', company: rv('Globex') })], []),
+    };
+    expect(applyReviews(profileWith([]), reviews)).toMatchObject({ added: 2, updated: 0, skipped: 0 });
+  });
+
+  it('leaves the rest of the profile alone', () => {
+    const before = profileWith([]);
+    const after = applyReviews(before, NO_ENTRIES).profile;
+    expect(after.identity).toBe(before.identity);
+    expect(after.employment).toEqual([]);
   });
 });

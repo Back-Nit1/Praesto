@@ -34,44 +34,20 @@ import {
   type MergeReport,
 } from '@profile/repository';
 import { labelForPath } from '@profile/paths';
-import { applyEntryDecisions, type EntryDecisionInput } from '@profile/entry-matching';
-import {
-  bestConfidence,
-  type ApplicantProfile,
-  type Education,
-  type Employment,
-  type Project,
-  type ProfileValue,
-} from '@profile/schema';
+import { bestConfidence, type ProfileValue } from '@profile/schema';
 import { parseResume, type ResumeParseResult } from '@resume-parser/index';
 import { createLogger } from '@shared/logging';
 import {
   EducationReview,
   EmploymentReview,
+  NO_ENTRIES,
   ProjectReview,
+  applyReviews,
   reviewEntries,
   type EntryReview,
+  type EntryReviews,
 } from './ResumeEntryReview';
 
-/**
- * The parsed schools, jobs and projects, each with the user's decision about it.
- *
- * Held next to `parsed` rather than derived from it, because it carries two
- * things the parse does not: the entries as the user has EDITED them, and what
- * they chose to do with each one.
- */
-interface EntryReviews {
-  education: EntryReview<Education>[];
-  employment: EntryReview<Employment>[];
-  projects: EntryReview<Project>[];
-}
-
-const NO_ENTRIES: EntryReviews = { education: [], employment: [], projects: [] };
-
-/** Strip a review down to what `applyEntryDecisions` needs. */
-function toDecision<T>({ entry, decision, match }: EntryReview<T>): EntryDecisionInput<T> {
-  return { entry, decision, ...(match === null ? {} : { matchIndex: match.index }) };
-}
 
 const log = createLogger('options:resume');
 
@@ -247,27 +223,14 @@ export function ResumeImport({
         duplicates. This is the only place those choices take effect - the
         review screen never writes anything.
 
-        The profile is re-read here, INSIDE the mutation, so the decisions are
-        applied to whatever storage holds now rather than to the copy the
-        review screen was built from. An update whose target has since moved is
-        appended instead of silently discarded - see `applyEntryDecisions`.
+        Applied INSIDE the mutation, so the decisions land on whatever storage
+        holds now rather than on the copy the review screen was built from. An
+        update whose target has since moved is appended instead of silently
+        discarded - see `applyEntryDecisions`.
       */
-      const education = applyEntryDecisions(profile.education, reviews.education.map(toDecision));
-      const employment = applyEntryDecisions(profile.employment, reviews.employment.map(toDecision));
-      const projects = applyEntryDecisions(profile.projects, reviews.projects.map(toDecision));
-
-      entryCounts = {
-        added: education.added + employment.added + projects.added,
-        updated: education.updated + employment.updated + projects.updated,
-        skipped: education.skipped + employment.skipped + projects.skipped,
-      };
-
-      const withEntries: ApplicantProfile = {
-        ...profile,
-        education: education.entries,
-        employment: employment.entries,
-        projects: projects.entries,
-      };
+      const applied = applyReviews(profile, reviews);
+      entryCounts = applied;
+      const withEntries = applied.profile;
 
       const merged = mergeCandidatesInto(withEntries, candidates);
       report = merged.report;
@@ -340,7 +303,7 @@ export function ResumeImport({
     <div className="max-w-4xl space-y-6">
       <section className="surface-card relative overflow-hidden p-6 sm:p-8">
         <div className="relative z-10 max-w-2xl">
-          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-indigo-500/20 bg-[var(--paper-2)] text-[var(--ink)]">
+          <div className="mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-[var(--rule)] bg-[var(--paper-2)] text-[var(--ink)]">
             <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 3.5h7l3 3V20H7z" /><path d="M14 3.5V7h3M9.5 11h5M9.5 14h5M9.5 17h3" />
             </svg>
@@ -365,7 +328,7 @@ export function ResumeImport({
             thing this product does not do.
           */}
           {editsPending && (
-            <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-[var(--ink)]">
+            <p className="mb-4 rounded-xl border border-[var(--s-review-line)] bg-[var(--s-review-wash)] p-3 text-sm text-[var(--ink)]">
               You have unsaved changes on the Profile tab. Save or discard them first - importing
               now would be undone the next time you save.
             </p>
@@ -394,7 +357,7 @@ export function ResumeImport({
           />
         </label>
         </div>
-        <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full border border-indigo-500/10 bg-indigo-500/5 shadow-[0_0_0_28px_rgba(99,81,220,0.025),0_0_0_58px_rgba(99,81,220,0.018)]" />
+        <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full border border-[var(--rule)] bg-[var(--paper-2)] shadow-[0_0_0_28px_rgba(99,81,220,0.025),0_0_0_58px_rgba(99,81,220,0.018)]" />
       </section>
 
       <StatusLine status={status} />
@@ -419,7 +382,7 @@ export function ResumeImport({
                 </span>
                 <div className="flex shrink-0 items-center gap-3">
                   {defaultId === document.id ? (
-                    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-[var(--s-verified)]">Default</span>
+                    <span className="rounded-full bg-[var(--s-verified-wash)] px-2 py-1 text-[10px] font-semibold text-[var(--s-verified)]">Default</span>
                   ) : (
                     <button
                       type="button"
@@ -510,7 +473,7 @@ function ReviewExtraction({
   const entries = Object.entries(parsed.scalars);
 
   return (
-    <section className="surface-card space-y-4 border-indigo-500/20 p-5">
+    <section className="surface-card space-y-4 border-[var(--rule)] p-5">
       <div>
         <h3 className="text-base font-semibold text-[var(--ink)]">Check what we read</h3>
         <p className="mt-1 text-sm text-[var(--ink-2)]">

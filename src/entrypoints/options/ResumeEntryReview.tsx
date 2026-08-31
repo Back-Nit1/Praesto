@@ -29,14 +29,16 @@
  */
 import { type ReactNode } from 'react';
 import {
+  applyEntryDecisions,
   findDuplicate,
   mergeGain,
   type DuplicateMatch,
   type EntryByKind,
   type EntryDecision,
+  type EntryDecisionInput,
   type EntryKind,
 } from '@profile/entry-matching';
-import type { Education, Employment, Project } from '@profile/schema';
+import type { ApplicantProfile, Education, Employment, Project } from '@profile/schema';
 import {
   EducationEntry,
   EmploymentEntry,
@@ -123,8 +125,8 @@ function ReviewSection<T extends { id: string }>({
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
-        <h4 className="text-sm font-semibold text-[--app-text]">{heading}</h4>
-        <span className="text-xs text-[--app-muted]">
+        <h4 className="text-sm font-semibold text-[var(--ink)]">{heading}</h4>
+        <span className="text-xs text-[var(--ink-2)]">
           {kept} of {reviews.length} selected
         </span>
       </div>
@@ -213,7 +215,7 @@ function DuplicateNote({
   onDecide: (decision: EntryDecision) => void;
 }): ReactNode {
   const choice = (value: EntryDecision, label: string): ReactNode => (
-    <label className="flex cursor-pointer items-center gap-2 text-xs text-[--app-text]">
+    <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--ink)]">
       <input
         type="radio"
         name={name}
@@ -225,10 +227,10 @@ function DuplicateNote({
   );
 
   return (
-    <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2.5">
-      <p className="text-xs font-semibold text-[--app-text]">
+    <div className="mt-3 rounded-xl border border-[var(--s-review-line)] bg-[var(--s-review-wash)] px-3 py-2.5">
+      <p className="text-xs font-semibold text-[var(--ink)]">
         Already in your profile
-        <span className="ml-2 font-normal text-[--app-muted]">{match.reason}</span>
+        <span className="ml-2 font-normal text-[var(--ink-2)]">{match.reason}</span>
       </p>
       <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5" role="radiogroup">
         {choice('skip', 'Skip - you already have it')}
@@ -282,4 +284,57 @@ export function ProjectReview(props: SectionProps<Project>): ReactNode {
       )}
     />
   );
+}
+
+// ---------------------------------------------------------------------------
+// Applying a screen's worth of reviews
+// ---------------------------------------------------------------------------
+
+/**
+ * The parsed schools, jobs and projects, each with the user's decision about it.
+ *
+ * Held alongside the parse rather than derived from it, because it carries two
+ * things the parse does not: the entries as the user has EDITED them, and what
+ * they chose to do with each one.
+ */
+export interface EntryReviews {
+  education: EntryReview<Education>[];
+  employment: EntryReview<Employment>[];
+  projects: EntryReview<Project>[];
+}
+
+export const NO_ENTRIES: EntryReviews = { education: [], employment: [], projects: [] };
+
+/** Strip a review down to what `applyEntryDecisions` needs. */
+function toDecision<T>({ entry, decision, match }: EntryReview<T>): EntryDecisionInput<T> {
+  return { entry, decision, ...(match === null ? {} : { matchIndex: match.index }) };
+}
+
+/**
+ * Apply every decision on the screen to a profile, and count what happened.
+ *
+ * Kept here, and pure, so "did unchecking that job actually keep it out of my
+ * profile" is answerable by a test rather than only by clicking through an
+ * upload. The import screen calls this inside its single atomic save; nothing
+ * in this module ever writes to storage itself.
+ */
+export function applyReviews(
+  profile: ApplicantProfile,
+  reviews: EntryReviews,
+): { profile: ApplicantProfile; added: number; updated: number; skipped: number } {
+  const education = applyEntryDecisions(profile.education, reviews.education.map(toDecision));
+  const employment = applyEntryDecisions(profile.employment, reviews.employment.map(toDecision));
+  const projects = applyEntryDecisions(profile.projects, reviews.projects.map(toDecision));
+
+  return {
+    profile: {
+      ...profile,
+      education: education.entries,
+      employment: employment.entries,
+      projects: projects.entries,
+    },
+    added: education.added + employment.added + projects.added,
+    updated: education.updated + employment.updated + projects.updated,
+    skipped: education.skipped + employment.skipped + projects.skipped,
+  };
 }
