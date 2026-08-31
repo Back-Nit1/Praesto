@@ -20,6 +20,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ResolvedFieldAction } from '@shared/messages';
 
+type MessageListener = (message: unknown, sender: { tab?: { id: number } }) => unknown;
+type TabUpdatedListener = (
+  tabId: number,
+  change: { url?: string },
+  tab: { id: number; url: string },
+) => void;
+
+/** The tab the panel sees as active. Tests move it to simulate navigation. */
+let activeTab = { id: 7, url: 'https://boards.greenhouse.io/acme/jobs/1' };
+let messageListeners: MessageListener[] = [];
+let tabUpdatedListeners: TabUpdatedListener[] = [];
+
+/** Deliver a runtime broadcast as if it came from a given tab. */
+function broadcast(message: unknown, fromTabId: number): void {
+  for (const listener of [...messageListeners]) listener(message, { tab: { id: fromTabId } });
+}
+
+/** Navigate a tab, the way Chrome reports it. */
+function navigate(tabId: number, url: string): void {
+  if (activeTab.id === tabId) activeTab = { id: tabId, url };
+  for (const listener of [...tabUpdatedListeners]) listener(tabId, { url }, { id: tabId, url });
+}
+
 /** Messages the panel sent to the page, in order. */
 let sent: Array<{ frameId: number; message: Record<string, unknown> }> = [];
 /** Queue of replies, consumed in order of the requests they answer. */
@@ -61,7 +84,15 @@ function installChromeFake(): void {
       remove: async () => true,
     },
     tabs: {
-      query: async () => [{ id: 7, url: 'https://boards.greenhouse.io/acme/jobs/1' }],
+      query: async () => [{ id: activeTab.id, url: activeTab.url }],
+      onUpdated: {
+        addListener: (fn: unknown) => tabUpdatedListeners.push(fn as TabUpdatedListener),
+        removeListener: (fn: unknown) => {
+          const index = tabUpdatedListeners.indexOf(fn as TabUpdatedListener);
+          if (index >= 0) tabUpdatedListeners.splice(index, 1);
+        },
+      },
+      onRemoved: { addListener: () => undefined, removeListener: () => undefined },
       sendMessage: async (_tabId: number, message: Record<string, unknown>, options?: { frameId?: number }) => {
         sent.push({ frameId: options?.frameId ?? 0, message });
         const queued = replies.get(String(message['type']));
@@ -72,7 +103,14 @@ function installChromeFake(): void {
       executeScript: async () => [{ frameId: 0 }],
     },
     runtime: {
-      onMessage: { addListener: () => undefined, removeListener: () => undefined },
+      id: 'test-extension',
+      onMessage: {
+        addListener: (fn: unknown) => messageListeners.push(fn as MessageListener),
+        removeListener: (fn: unknown) => {
+          const index = messageListeners.indexOf(fn as MessageListener);
+          if (index >= 0) messageListeners.splice(index, 1);
+        },
+      },
       openOptionsPage: () => {
         optionsOpened++;
       },
@@ -102,6 +140,9 @@ beforeEach(() => {
   sent = [];
   replies = new Map();
   optionsOpened = 0;
+  activeTab = { id: 7, url: 'https://boards.greenhouse.io/acme/jobs/1' };
+  messageListeners = [];
+  tabUpdatedListeners = [];
 });
 
 /** Click by accessible name, the way the user reaches it. */
@@ -289,6 +330,53 @@ describe('side panel - a missing profile', () => {
     click(/scan this page/i);
 
     await screen.findByText(/12 fields found/i);
+  });
+});
+
+describe('side panel - which page a scan belongs to', () => {
+  it('refuses to fill a different application on the same site', async () => {
+    // The gap a hostname check could not see: every application on a careers
+    // site shares one hostname, so filling here would have applied the FIRST
+    // application's field list, by localId, to the SECOND one's DOM.
+    await scanWith([action({})]);
+
+    activeTab = { id: 7, url: 'https://boards.greenhouse.io/acme/jobs/2' };
+    click(/fill 1 safe field/i);
+
+    await screen.findByText(/different application/i);
+    expect(sent.some((entry) => entry.message['type'] === 'CONTENT_FILL')).toBe(false);
+  });
+
+  it('refuses to fill when the user has switched tabs', async () => {
+    await scanWith([action({})]);
+
+    activeTab = { id: 9, url: 'https://example.com/something-else' };
+    click(/fill 1 safe field/i);
+
+    await screen.findByText(/you are now on example\.com/i);
+    expect(sent.some((entry) => entry.message['type'] === 'CONTENT_FILL')).toBe(false);
+  });
+
+  it('drops the field list when the scanned tab navigates away', async () => {
+    await scanWith([action({})]);
+    expect(screen.queryByText(/fields detected/i)).not.toBeNull();
+
+    navigate(7, 'https://boards.greenhouse.io/acme/jobs/2');
+
+    // A field list is a set of localIds that only mean something to the
+    // document that produced them. Showing it after a navigation invites a
+    // click on a page it was never about.
+    await waitFor(() => expect(screen.queryByText(/fields detected/i)).toBeNull());
+  });
+
+  it('ignores a "form changed" broadcast from another tab', async () => {
+    await scanWith([action({})]);
+
+    broadcast({ type: 'PAGE_FIELDS_CHANGED' }, 99);
+    expect(screen.queryByText(/this form changed/i)).toBeNull();
+
+    broadcast({ type: 'PAGE_FIELDS_CHANGED' }, 7);
+    await screen.findByText(/this form changed/i);
   });
 });
 

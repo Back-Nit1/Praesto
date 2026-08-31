@@ -122,15 +122,50 @@ function isScannableUrl(url: string | undefined): boolean {
   }
 }
 
-/** Hostname of the active tab, for showing the user where their data goes. */
-async function activeTabHostname(): Promise<string | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!isScannableUrl(tab?.url)) return undefined;
+/**
+ * WHICH PAGE a scan belongs to.
+ *
+ * The hostname alone was not enough, and the gap was not theoretical: every
+ * application on a careers site shares one hostname, so scanning
+ * `boards.greenhouse.io/acme/jobs/1`, navigating to `.../jobs/2` and clicking
+ * Fill passed the hostname check and then filled the SECOND application from
+ * the FIRST one's field list - by localId, against elements that no longer
+ * mean what they meant. The tab id matters for the same reason in the other
+ * direction: the panel outlives the tab it was opened over, and the user can
+ * switch tabs mid-application.
+ *
+ * The URL is compared without its fragment. `#section` is a scroll position,
+ * not a different page, and treating it as one would invalidate a scan every
+ * time the form scrolled itself.
+ */
+interface ScanTarget {
+  tabId: number;
+  /** Full URL, fragment stripped. */
+  url: string;
+  /** Hostname, for the one thing the user actually needs to read. */
+  host: string;
+}
+
+function targetFromTab(tab: chrome.tabs.Tab | undefined): ScanTarget | undefined {
+  if (tab?.id === undefined || !isScannableUrl(tab.url)) return undefined;
   try {
-    return new URL(tab?.url ?? '').hostname;
+    const parsed = new URL(tab.url ?? '');
+    parsed.hash = '';
+    return { tabId: tab.id, url: parsed.href, host: parsed.hostname };
   } catch {
     return undefined;
   }
+}
+
+/** The page the user is looking at right now. */
+async function activeTarget(): Promise<ScanTarget | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return targetFromTab(tab);
+}
+
+/** Same tab, same address - the two conditions for a scan still being valid. */
+function sameTarget(a: ScanTarget | undefined, b: ScanTarget | undefined): boolean {
+  return a !== undefined && b !== undefined && a.tabId === b.tabId && a.url === b.url;
 }
 
 const log = createLogger('sidepanel');
@@ -199,7 +234,8 @@ export function App(): ReactNode {
    * whatever page is active AT THAT MOMENT, which is not necessarily the page
    * that was scanned. Naming the target out loud is what lets the user notice.
    */
-  const [targetHost, setTargetHost] = useState<string | undefined>(undefined);
+  const [target, setTarget] = useState<ScanTarget | undefined>(undefined);
+  const targetHost = target?.host;
 
   /**
    * Listen for the scanner's "this form changed" broadcast.
@@ -210,17 +246,72 @@ export function App(): ReactNode {
    * It offers a rescan; it never rescans or fills on its own.
    */
   useEffect(() => {
-    const listener = (message: unknown): undefined => {
-      if ((message as { type?: string } | null)?.type === 'PAGE_FIELDS_CHANGED') {
-        setPageChanged(true);
-      }
+    const listener = (message: unknown, sender: chrome.runtime.MessageSender): undefined => {
+      if ((message as { type?: string } | null)?.type !== 'PAGE_FIELDS_CHANGED') return undefined;
+
+      // FROM THE TAB WE SCANNED, or not at all. The broadcast reaches every
+      // extension context, and the scanner is injected into every tab the user
+      // has ever scanned - so without this check, a background tab quietly
+      // re-rendering would tell the user that the form in FRONT of them had
+      // changed. `sender.tab` is filled in by the browser, not by the sender.
+      if (target === undefined || sender.tab?.id !== target.tabId) return undefined;
+
+      setPageChanged(true);
       // Explicitly NOT returning true: this listener never answers, and
       // claiming the channel would leave the sender waiting for a reply.
       return undefined;
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, []);
+  }, [target]);
+
+  /**
+   * Drop a scan when the page it describes is gone.
+   *
+   * A field list is a set of `localId`s that only mean anything to the
+   * document that produced them. Once that tab navigates - or closes - the
+   * list describes nothing, and leaving it on screen invites the user to click
+   * Fill on a page it was never about. The fill path refuses that anyway; this
+   * is so the panel stops SHOWING a stale list in the first place.
+   *
+   * A same-document navigation (an in-page step of a multi-step application)
+   * still changes the URL, so it clears the scan too - correctly: the fields on
+   * step 2 are not the fields we scanned on step 1.
+   */
+  useEffect(() => {
+    if (target === undefined) return undefined;
+
+    const invalidate = (): void => {
+      setTarget(undefined);
+      setPageChanged(false);
+      setState({ kind: 'idle' });
+      setStatus({ kind: 'idle' });
+    };
+
+    const onUpdated = (
+      tabId: number,
+      change: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab,
+    ): void => {
+      if (tabId !== target.tabId) return;
+      // Only a URL change matters. A tab reports status, favicon and title
+      // changes constantly, and none of them invalidate a field list.
+      if (change.url === undefined) return;
+      if (sameTarget(target, targetFromTab(tab))) return;
+      invalidate();
+    };
+
+    const onRemoved = (tabId: number): void => {
+      if (tabId === target.tabId) invalidate();
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    return () => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+    };
+  }, [target]);
 
   /**
    * Ensure the scanner is present in the active tab, then message it.
@@ -325,7 +416,7 @@ export function App(): ReactNode {
     setBusy(true);
     setStatus({ kind: 'idle' });
     setState({ kind: 'scanning' });
-    setTargetHost(await activeTabHostname());
+    setTarget(await activeTarget());
 
     const injected = await injectScanner();
     if (!injected.ok) {
@@ -468,12 +559,15 @@ export function App(): ReactNode {
      * stopping an attacker - it is about not sending a person's home address
      * somewhere they did not mean to.
      */
-    const currentHost = await activeTabHostname();
-    if (targetHost !== undefined && currentHost !== targetHost) {
+    const current = await activeTarget();
+    if (target !== undefined && !sameTarget(target, current)) {
       setBusy(false);
       setStatus({
         kind: 'error',
-        message: `You are now on ${currentHost ?? 'another page'}, not ${targetHost}. Rescan before filling.`,
+        message:
+          current?.host === target.host
+            ? `This is a different application on ${target.host}. Rescan before filling.`
+            : `You are now on ${current?.host ?? 'another page'}, not ${target.host}. Rescan before filling.`,
       });
       return;
     }
@@ -505,13 +599,13 @@ export function App(): ReactNode {
       }
     }
 
-    const target = await injectScanner();
-    if (!target.ok) {
+    const injection = await injectScanner();
+    if (!injection.ok) {
       setBusy(false);
       // Reuse the same diagnosis as the scan path. A permission that lapsed
       // between scanning and filling deserves the same one-click fix, not a
       // vaguer message because it happened at a different moment.
-      setStatus({ kind: 'error', message: describeInjectionFailure(target).message });
+      setStatus({ kind: 'error', message: describeInjectionFailure(injection).message });
       return;
     }
 
@@ -535,7 +629,7 @@ export function App(): ReactNode {
 
     const replies = await Promise.all(
       [...byFrame.entries()].map(([frameId, actions]) =>
-        sendToFrame<ContentFillResponse | ContentErrorResponse>(target.tabId, frameId, {
+        sendToFrame<ContentFillResponse | ContentErrorResponse>(injection.tabId, frameId, {
           type: 'CONTENT_FILL',
           actions,
           ...(resume !== undefined ? { resume } : {}),
