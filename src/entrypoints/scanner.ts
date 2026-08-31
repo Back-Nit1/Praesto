@@ -136,6 +136,51 @@ export default defineUnlistedScript(() => {
       actions: ResolvedFieldAction[];
       fieldsDetected: number;
       error?: { code: string; message: string };
+      /** Cross-origin iframes on this page - see `embeddedOrigins` below. */
+      embeddedOrigins?: string[];
+    }
+
+    /**
+     * Largest number of embedded origins reported.
+     *
+     * A page can carry dozens of tracking iframes; the panel only ever offers
+     * the user a handful of buttons, and an unbounded list is a message
+     * payload a hostile page could inflate at will.
+     */
+    const MAX_EMBEDDED_ORIGINS = 8;
+
+    /**
+     * The distinct origins of this document's cross-origin iframes.
+     *
+     * Reading the `src` ATTRIBUTE of a cross-origin frame is allowed - the
+     * same-origin policy protects the frame's document, not the tag that
+     * created it - so the top frame can name the site an embedded application
+     * comes from even though it cannot see inside it. That name is what lets
+     * the panel ask for permission to the right host instead of reporting an
+     * empty page.
+     *
+     * One pass, and the Set is bounded by the cap, so this is O(1) memory
+     * regardless of how many frames a page carries.
+     */
+    function collectEmbeddedOrigins(): string[] {
+      const origins = new Set<string>();
+      const frames = document.getElementsByTagName('iframe');
+
+      for (let index = 0; index < frames.length; index++) {
+        if (origins.size >= MAX_EMBEDDED_ORIGINS) break;
+        const source = frames[index]?.getAttribute('src');
+        if (source === null || source === undefined || source.length === 0) continue;
+        try {
+          const url = new URL(source, location.href);
+          if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
+          if (url.origin === location.origin) continue;
+          origins.add(url.origin);
+        } catch {
+          // A relative or malformed src we cannot resolve. Nothing to report.
+        }
+      }
+
+      return [...origins];
     }
 
     /** Scan, ask the worker what to do, and report back. Never fills. */
@@ -160,7 +205,18 @@ export default defineUnlistedScript(() => {
       // reporting again.
       changeAlreadyReported = false;
 
-      if (scan.fields.length === 0) return { actions: [], fieldsDetected: 0 };
+      if (scan.fields.length === 0) {
+        // The case this matters most for: an employer's careers page whose
+        // only form is inside an embedded ATS iframe we were not allowed into.
+        // Reporting the origins turns "no form here" into a request the user
+        // can grant.
+        const embedded = collectEmbeddedOrigins();
+        return {
+          actions: [],
+          fieldsDetected: 0,
+          ...(embedded.length > 0 ? { embeddedOrigins: embedded } : {}),
+        };
+      }
 
       const request: ResolveApplicationFieldsRequest = {
         type: 'RESOLVE_APPLICATION_FIELDS',
@@ -197,7 +253,12 @@ export default defineUnlistedScript(() => {
           `${response.summary.readyToFill} ready, ${response.summary.needsReview} to review`,
       );
 
-      return { actions: response.actions, fieldsDetected: scan.fields.length };
+      const embedded = collectEmbeddedOrigins();
+      return {
+        actions: response.actions,
+        fieldsDetected: scan.fields.length,
+        ...(embedded.length > 0 ? { embeddedOrigins: embedded } : {}),
+      };
     }
 
     /**
@@ -606,6 +667,9 @@ export default defineUnlistedScript(() => {
               ok: true,
               actions: outcome.actions,
               fieldsDetected: outcome.fieldsDetected,
+              ...(outcome.embeddedOrigins !== undefined
+                ? { embeddedOrigins: outcome.embeddedOrigins }
+                : {}),
             };
             sendResponse(success);
           })

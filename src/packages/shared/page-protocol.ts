@@ -83,6 +83,22 @@ export interface ContentScanResponse {
   ok: true;
   actions: ResolvedFieldAction[];
   /**
+   * Origins of the cross-origin iframes on this page.
+   *
+   * `chrome.scripting.executeScript({ allFrames: true })` CHOOSES frames; it
+   * does not grant access to them. `activeTab` covers the tab's own origin, so
+   * an application embedded from another origin - which is how nearly every
+   * employer runs Greenhouse, Lever or Workday on their own careers page - is
+   * silently skipped: the injection succeeds, returns only the frames we were
+   * allowed into, and the panel reports a page with no form on it.
+   *
+   * The top frame can still READ the `src` attribute of a cross-origin iframe
+   * (the same-origin policy stops it reading the DOCUMENT, not the tag), so it
+   * can name the origins involved. The panel turns that into a one-click
+   * permission request for the site the form actually comes from.
+   */
+  embeddedOrigins?: string[];
+  /**
    * How many controls the scan actually found.
    *
    * Reported separately from `actions.length` so the panel can tell "there is

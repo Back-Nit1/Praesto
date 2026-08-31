@@ -192,6 +192,12 @@ type InjectionResult =
   | { ok: false; reason: 'local_file' }
   | { ok: false; reason: 'needs_permission'; origin: string }
   | { ok: false; reason: 'no_tab' }
+  /**
+   * We cannot see the tab's address, which means we have no access to it yet -
+   * Chrome hides `tab.url` without host permission or the `tabs` permission.
+   * Distinct from `failed`: nothing went wrong, a grant simply lapsed.
+   */
+  | { ok: false; reason: 'no_access_yet' }
   | { ok: false; reason: 'failed'; detail: string };
 
 type InjectionFailure = Extract<InjectionResult, { ok: false }>;
@@ -235,6 +241,13 @@ export function App(): ReactNode {
    * that was scanned. Naming the target out loud is what lets the user notice.
    */
   const [target, setTarget] = useState<ScanTarget | undefined>(undefined);
+  /**
+   * Cross-origin iframes on the scanned page that we have no permission for.
+   *
+   * Held separately from the scan result because it is not a property of the
+   * form - it is a property of what we were allowed to look at.
+   */
+  const [blockedOrigins, setBlockedOrigins] = useState<string[]>([]);
   const targetHost = target?.host;
 
   /**
@@ -342,17 +355,39 @@ export function App(): ReactNode {
     }
     if (access.kind === 'local_file') return { ok: false, reason: 'local_file' };
     if (access.kind === 'unknown') {
-      return { ok: false, reason: 'failed', detail: 'This tab has no address yet' };
+      /**
+       * WE CANNOT SEE THE TAB'S ADDRESS - which is itself the diagnosis.
+       *
+       * Chrome hides `tab.url` from an extension that holds neither the `tabs`
+       * permission nor host access to that tab. `activeTab` grants host access,
+       * and Chrome REVOKES it the moment the tab navigates. So the ordinary
+       * flow - open the panel, browse to a job posting, click Scan - lands
+       * here, with no URL, and therefore no origin to request permission for.
+       *
+       * This used to report "This tab has no address yet", which sounds like a
+       * page still loading and leaves the user waiting for something that will
+       * never happen. It is not a loading state: it is a revoked grant, and
+       * clicking the toolbar icon restores it in one action - that click IS an
+       * invocation, which is exactly what `activeTab` is granted by.
+       */
+      return { ok: false, reason: 'no_access_yet' };
     }
 
     try {
       /**
        * Injected into every frame.
        *
-       * `allFrames: true` under `activeTab` covers embedded application forms -
-       * a Greenhouse or Lever iframe on a company careers page - and needs no
-       * additional permission. Frames Chrome refuses (about:blank, a
-       * cross-origin frame mid-navigation) simply do not appear in the results.
+       * `allFrames: true` CHOOSES frames; it does not grant access to them.
+       * `activeTab` covers the tab's own origin, so a same-origin iframe is
+       * reached and a CROSS-ORIGIN one - which is how nearly every employer
+       * embeds Greenhouse, Lever or Workday - is not. Chrome does not report
+       * that as an error: the injection succeeds and simply returns fewer
+       * frames.
+       *
+       * So the empty result is handled downstream instead: the top frame
+       * reports the origins of the iframes it can see, and the panel offers a
+       * one-click grant for the site the form actually comes from. See
+       * `EmbeddedFormPrompt`.
        */
       const injected = await chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
@@ -484,6 +519,28 @@ export function App(): ReactNode {
     }
 
     setState({ kind: 'scanned', actions, fieldsDetected, outcomes: {}, frameByLocalId });
+
+    /**
+     * Which embedded sites we could not read.
+     *
+     * Checked AFTER the scan rather than before, because the answer only
+     * matters once we know what the accessible frames produced - a page whose
+     * own form scanned fine still needs this if its iframe holds the rest of
+     * the questions.
+     */
+    const embedded = new Set<string>();
+    for (const scan of scans) {
+      if (scan.response?.ok !== true) continue;
+      for (const origin of scan.response.embeddedOrigins ?? []) embedded.add(origin);
+    }
+
+    if (embedded.size === 0) {
+      setBlockedOrigins([]);
+      return;
+    }
+
+    const granted = await Promise.all([...embedded].map((origin) => hasAccess(origin)));
+    setBlockedOrigins([...embedded].filter((_origin, index) => granted[index] !== true));
   }, [injectScanner, sendToFrame]);
 
   /**
@@ -776,6 +833,14 @@ export function App(): ReactNode {
         </div>
       )}
 
+      {state.kind === 'scanned' && blockedOrigins.length > 0 && (
+        <EmbeddedFormPrompt
+          origins={blockedOrigins}
+          busy={busy}
+          onGranted={() => void handleScan()}
+        />
+      )}
+
       {state.kind === 'scanned' && (
         <ScanReport
           actions={state.actions}
@@ -834,10 +899,83 @@ function describeInjectionFailure(failure: InjectionFailure): {
     case 'no_tab':
       return { message: 'No active tab. Click the page you want to fill, then scan again.' };
 
+    case 'no_access_yet':
+      // Not a broken page and not a permanent block - a grant that lapsed on
+      // navigation. The recovery is one click, and it is a click Chrome will
+      // only accept on the toolbar icon, so the panel has to ask for it rather
+      // than offer a button that cannot work.
+      return {
+        message:
+          'Chrome withdrew this extension\'s access when you navigated here. Click the extension icon in your toolbar to give it access to this tab, then scan again.',
+        code: 'NEEDS_INVOCATION',
+      };
+
     case 'failed':
       // The honest fallback: we do not know, and we say the browser's own words
       // rather than inventing a cause.
       return { message: `This page could not be reached: ${failure.detail}` };
+  }
+}
+
+/**
+ * "The form is on a site we have not been allowed to read."
+ *
+ * THE FAILURE THIS REPLACES. An employer's careers page with a Greenhouse
+ * iframe scanned as a page with three fields and no application - because
+ * `allFrames: true` only selects frames, and `activeTab` never covered the
+ * embedded origin. The user saw "no application form detected" on a page
+ * plainly showing an application form.
+ *
+ * The grant is per origin and permanent until revoked, which is the right
+ * shape here: someone applying through Greenhouse will meet it again on the
+ * next employer's site, and being asked once is reasonable where being asked
+ * every time would train them to click through.
+ */
+function EmbeddedFormPrompt({
+  origins,
+  busy,
+  onGranted,
+}: {
+  origins: string[];
+  busy: boolean;
+  onGranted: () => void;
+}): ReactNode {
+  return (
+    <div className="my-2 rounded border border-blue-300 bg-blue-50/60 p-3 text-xs dark:border-blue-900 dark:bg-blue-950/30">
+      <p className="mb-2">
+        Part of this page is loaded from another site. Chrome needs your permission before the
+        extension can read the form inside it.
+      </p>
+      <div className="flex flex-col gap-1">
+        {origins.map((origin) => (
+          <Button
+            key={origin}
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              // Called straight from the click. Chrome refuses a permission
+              // prompt that is not inside a user gesture, and refuses it
+              // silently by resolving false - indistinguishable from the user
+              // saying no. So this must not be moved into an effect or a retry.
+              void requestAccess(origin).then((granted) => {
+                if (granted) onGranted();
+              });
+            }}
+          >
+            Allow {hostOf(origin)}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Hostname for display. Falls back to the raw origin if it will not parse. */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return origin;
   }
 }
 

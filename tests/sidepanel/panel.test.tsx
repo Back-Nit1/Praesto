@@ -27,6 +27,9 @@ type TabUpdatedListener = (
   tab: { id: number; url: string },
 ) => void;
 
+/** Host patterns the extension currently holds. */
+let grantedOrigins = new Set<string>(['https://boards.greenhouse.io/*']);
+
 /** The tab the panel sees as active. Tests move it to simulate navigation. */
 let activeTab = { id: 7, url: 'https://boards.greenhouse.io/acme/jobs/1' };
 let messageListeners: MessageListener[] = [];
@@ -79,8 +82,12 @@ function installChromeFake(): void {
     // already allowed onto. The panel classifies the tab before injecting, so
     // a tab with no URL would be reported as unscannable rather than scanned.
     permissions: {
-      contains: async () => true,
-      request: async () => true,
+      contains: async (filter: { origins?: string[] }) =>
+        (filter.origins ?? []).every((pattern) => grantedOrigins.has(pattern)),
+      request: async (filter: { origins?: string[] }) => {
+        for (const pattern of filter.origins ?? []) grantedOrigins.add(pattern);
+        return true;
+      },
       remove: async () => true,
     },
     tabs: {
@@ -141,6 +148,7 @@ beforeEach(() => {
   replies = new Map();
   optionsOpened = 0;
   activeTab = { id: 7, url: 'https://boards.greenhouse.io/acme/jobs/1' };
+  grantedOrigins = new Set(['https://boards.greenhouse.io/*']);
   messageListeners = [];
   tabUpdatedListeners = [];
 });
@@ -151,8 +159,11 @@ function click(name: RegExp): void {
 }
 
 /** Scan, with a scripted set of actions, and wait for the report to render. */
-async function scanWith(actions: ResolvedFieldAction[]): Promise<void> {
-  reply('CONTENT_SCAN', { ok: true, actions, fieldsDetected: actions.length });
+async function scanWith(
+  actions: ResolvedFieldAction[],
+  extra: { embeddedOrigins?: string[] } = {},
+): Promise<void> {
+  reply('CONTENT_SCAN', { ok: true, actions, fieldsDetected: actions.length, ...extra });
   render(<App />);
   click(/scan this page/i);
   await screen.findByText(/fields detected/i);
@@ -330,6 +341,38 @@ describe('side panel - a missing profile', () => {
     click(/scan this page/i);
 
     await screen.findByText(/12 fields found/i);
+  });
+});
+
+describe('side panel - an embedded application form', () => {
+  it('offers a grant for the site the form is actually on', async () => {
+    // What the user sees today on an employer's careers page: three fields in
+    // the outer page and an entire Greenhouse application in an iframe that
+    // `allFrames: true` selected and Chrome refused to inject into.
+    reply('CONTENT_SCAN', {
+      ok: true,
+      actions: [],
+      fieldsDetected: 0,
+      embeddedOrigins: ['https://job-boards.greenhouse.io'],
+    });
+    render(<App />);
+    click(/scan this page/i);
+
+    const allow = await screen.findByRole('button', { name: /allow job-boards\.greenhouse\.io/i });
+
+    // Granting rescans, and the second scan sees the form.
+    reply('CONTENT_SCAN', { ok: true, actions: [action({})], fieldsDetected: 1 });
+    fireEvent.click(allow);
+
+    await screen.findByText(/fields detected/i);
+    expect(grantedOrigins.has('https://job-boards.greenhouse.io/*')).toBe(true);
+  });
+
+  it('says nothing about an embedded site it can already read', async () => {
+    grantedOrigins.add('https://job-boards.greenhouse.io/*');
+    await scanWith([action({})], { embeddedOrigins: ['https://job-boards.greenhouse.io'] });
+
+    expect(screen.queryByRole('button', { name: /^allow /i })).toBeNull();
   });
 });
 
