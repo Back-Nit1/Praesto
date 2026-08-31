@@ -65,6 +65,23 @@ export const STORAGE_KEYS = {
    * courtesy limit; the enforceable one is the backend's.
    */
   modelQuota: `${PREFIX}:backend:modelQuota`,
+
+  /**
+   * Scans awaiting their fill results, keyed by tab and address.
+   *
+   * SESSION AREA, not local. It is short-lived join state - the mapping
+   * metadata a history row needs, held between the scan that produced it and
+   * the fill report that completes it - and it should not outlive the browser
+   * session or ever reach the disk. See audit/pending.ts.
+   */
+  pendingRuns: `${PREFIX}:session:pendingRuns`,
+
+  /**
+   * The side panel's last scan, per tab, so closing the panel does not destroy
+   * the record of what was filled. Also session-area, for the same reasons.
+   * The tab id is appended: `aa:session:panel:42`.
+   */
+  panelSnapshotPrefix: `${PREFIX}:session:panel`,
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
