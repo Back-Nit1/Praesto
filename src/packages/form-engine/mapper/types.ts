@@ -72,6 +72,34 @@ export interface MappingReason {
   detail?: string;
 }
 
+/**
+ * Why the cascade produced no mapping.
+ *
+ * "I don't know" has always been expressible; "why I don't know" has not, and
+ * the three answers are not interchangeable. A later stage that wants a second
+ * opinion on an unrecognised question must be able to tell them apart, because
+ * only ONE of them is a question about meaning:
+ *
+ *   no_signal            Nothing in the cascade matched. The question may still
+ *                        have an answer - we simply did not recognise it. This
+ *                        is the only refusal a semantic fallback should touch.
+ *
+ *   unsupported_control  A `kind` we cannot drive, or a control the page has
+ *                        disabled. Even a perfect mapping could not be acted
+ *                        on, so working out the meaning would buy nothing.
+ *
+ *   user_suppressed      A user-confirmed learned rule with an empty path -
+ *                        "this question means nothing, leave it alone". This
+ *                        is not an absence of knowledge, it is knowledge, and
+ *                        it is the user's. Nothing may reopen it.
+ *
+ * Collapsing these into one value would, at best, spend work on a control that
+ * cannot be filled and, at worst, quietly re-open a field the user personally
+ * closed - which is the exact failure the learned-mapping short circuit in
+ * `mapper.ts` was written to prevent.
+ */
+export type MappingRefusalReason = 'no_signal' | 'unsupported_control' | 'user_suppressed';
+
 export interface FieldMappingResult {
   /** The descriptor's `localId`. Ties the result back to a DOM element. */
   fieldId: string;
@@ -91,10 +119,32 @@ export interface FieldMappingResult {
    * rule) can see the alternative instead of only our first choice.
    */
   alternatives?: Array<{ profilePath: ProfilePath; confidence: number }>;
+
+  /**
+   * Present ONLY when `profilePath` is null.
+   *
+   * Deliberately absent on a success rather than set to some "n/a" member: an
+   * optional field that is present exactly when it is meaningful cannot be
+   * misread, whereas a sentinel value invites a caller to branch on it in the
+   * one case where it says nothing.
+   */
+  refusalReason?: MappingRefusalReason;
 }
 
-/** The "we do not know" result. Its own constructor so it reads deliberately. */
-export function unknownMapping(fieldId: string, reasons: MappingReason[] = []): FieldMappingResult {
+/**
+ * The "we do not know" result. Its own constructor so it reads deliberately.
+ *
+ * `no_signal` is the default because it is the WEAKEST claim of the three: it
+ * says only that we failed to recognise the question. A caller that forgets to
+ * name a reason therefore gets the answer that grants no permission and asserts
+ * nothing about the user's wishes - the two stronger reasons must be stated on
+ * purpose.
+ */
+export function unknownMapping(
+  fieldId: string,
+  reasons: MappingReason[] = [],
+  refusalReason: MappingRefusalReason = 'no_signal',
+): FieldMappingResult {
   return {
     fieldId,
     profilePath: null,
@@ -102,5 +152,6 @@ export function unknownMapping(fieldId: string, reasons: MappingReason[] = []): 
     knowledgeState: 'unknown',
     reasons,
     source: 'none',
+    refusalReason,
   };
 }
