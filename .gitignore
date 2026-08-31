@@ -34,3 +34,6 @@ Security.md
 # Playwright output
 test-results/
 playwright-report/
+
+# Agent worktrees (isolated checkouts, never part of the source tree)
+.claude/worktrees/
