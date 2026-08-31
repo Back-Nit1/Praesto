@@ -82,6 +82,29 @@ export const STORAGE_KEYS = {
    * The tab id is appended: `aa:session:panel:42`.
    */
   panelSnapshotPrefix: `${PREFIX}:session:panel`,
+
+  /**
+   * A toolbar click waiting for the side panel to consume it.
+   *
+   * SESSION AREA, with the tab id appended. The action click is the browser
+   * gesture that restores `activeTab`; this short-lived handoff lets a panel
+   * that is still opening know that the click also meant "scan this tab".
+   */
+  toolbarScanPrefix: `${PREFIX}:session:toolbarScan`,
+
+  /**
+   * Questions the semantic fallback has already resolved, so each distinct one
+   * costs at most one model call ever.
+   *
+   * A SEPARATE KEY FROM `learnedMappings`, and the separation is the point: one
+   * holds what the USER said a field means and is read by the mapper at
+   * user-level confidence; this one holds what a MODEL guessed and must never
+   * acquire that authority. See semantic/cache.ts for the full argument.
+   *
+   * Local rather than session: the entire value of the cache is that it
+   * survives to the next application, which is usually the next day.
+   */
+  semanticConcepts: `${PREFIX}:semantic:concepts`,
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
