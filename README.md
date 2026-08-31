@@ -54,8 +54,8 @@ npm run fixtures   # serve the practice forms at http://localhost:5174
 npm run fixtures
 ```
 
-Open <http://localhost:5174>, pick a form, click the extension icon, then
-**Scan this page**. What each fixture is for:
+Open <http://localhost:5174>, pick a form, and click the extension icon. That
+click opens the panel and scans the current page. What each fixture is for:
 
 | Fixture | What should happen |
 |---|---|

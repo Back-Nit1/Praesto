@@ -34,7 +34,7 @@
  * There is no auto-fill-on-load path, and spec section 21.4 forbids submitting
  * the form under any circumstances.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BrandMark, Button, StateBadge, StatusLine, type FieldState } from '@/components/ui';
 import type { ResolvedFieldAction } from '@shared/messages';
 import {
@@ -71,6 +71,10 @@ import { StoredProfileRepository } from '@profile/repository';
 import type { MappingScope } from '@learning/types';
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { ResumeDocumentStore } from '@storage/documents';
+import {
+  isToolbarScanSignal,
+  ToolbarScanStore,
+} from '@storage/toolbar-scan';
 
 /** Matches the key written by the options page's Resume tab. */
 const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
@@ -80,6 +84,7 @@ const settings = new ChromeLocalStore();
  * was filled and what failed. See session-snapshot.ts.
  */
 const snapshots = new PanelSnapshotStore();
+const toolbarScans = new ToolbarScanStore();
 const resumes = new ResumeDocumentStore();
 const profiles = new StoredProfileRepository(settings);
 
@@ -202,6 +207,8 @@ export function App(): ReactNode {
    * form - it is a property of what we were allowed to look at.
    */
   const [blockedOrigins, setBlockedOrigins] = useState<string[]>([]);
+  /** Prevent the mount fallback and live toolbar signal from scanning twice. */
+  const toolbarScanInFlight = useRef(false);
   const targetHost = target?.host;
 
   /**
@@ -564,6 +571,51 @@ export function App(): ReactNode {
     const granted = await Promise.all([...embedded].map((origin) => hasAccess(origin)));
     setBlockedOrigins([...embedded].filter((_origin, index) => granted[index] !== true));
   }, [injectScanner, sendToFrame]);
+
+  /**
+   * Consume the scan request created by a toolbar invocation.
+   *
+   * The action click is the event that gives this extension `activeTab` again.
+   * Treating the same click as the scan request removes the old "click the icon,
+   * then click Scan" loop without asking for the broad `tabs` permission.
+   */
+  const consumeToolbarScan = useCallback(
+    async (signalledTabId?: number): Promise<void> => {
+      if (toolbarScanInFlight.current) return;
+      toolbarScanInFlight.current = true;
+
+      try {
+        const current = await activeTarget();
+        if (current === undefined) return;
+        // A global side panel can exist in more than one browser window. Never
+        // consume one window's click from a panel looking at another tab.
+        if (signalledTabId !== undefined && current.tabId !== signalledTabId) return;
+
+        const pending = await toolbarScans.take(current.tabId);
+        if (!pending.ok) {
+          log.warn('Could not read the toolbar scan request', pending.error.code);
+          return;
+        }
+        if (pending.value) await handleScan();
+      } finally {
+        toolbarScanInFlight.current = false;
+      }
+    },
+    [handleScan],
+  );
+
+  useEffect(() => {
+    // Closed-panel path: the background queued the request before opening us.
+    void consumeToolbarScan();
+
+    // Already-open path: consume immediately instead of waiting for a remount.
+    const listener = (message: unknown): undefined => {
+      if (isToolbarScanSignal(message)) void consumeToolbarScan(message.tabId);
+      return undefined;
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [consumeToolbarScan]);
 
   /**
    * Teach the system what a field means.
@@ -932,7 +984,7 @@ function describeInjectionFailure(failure: InjectionFailure): {
       // than offer a button that cannot work.
       return {
         message:
-          'Chrome withdrew this extension\'s access when you navigated here. Click the extension icon in your toolbar to give it access to this tab, then scan again.',
+          'Chrome withdrew this extension\'s access when you navigated here. Click the extension icon in your toolbar; the panel will regain access and scan this tab automatically.',
         code: 'NEEDS_INVOCATION',
       };
 

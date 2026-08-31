@@ -41,6 +41,7 @@ import {
 } from '@shared/messages';
 import { ChromeLocalStore } from '@storage/key-value-store';
 import { runMigrations } from '@storage/migrations';
+import { TOOLBAR_SCAN_SIGNAL, ToolbarScanStore } from '@storage/toolbar-scan';
 import { StoredProfileRepository } from '@profile/repository';
 import { isProfilePath, labelForPath, parseCollectionPath } from '@profile/paths';
 import { currentEmploymentIndex, mostRecentEducationIndex } from '@profile/selectors';
@@ -54,8 +55,18 @@ import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprin
 import { mapField, type CollectionEntryIndexes } from '@form-engine/mapper/mapper';
 import { isResumeField } from '@form-engine/mapper/resume-field';
 import { resolveValue } from '@form-engine/resolver/resolver';
-import { decideFill } from '@form-engine/confidence/policy';
+import { decideFill, DEFAULT_CONFIDENCE_POLICY } from '@form-engine/confidence/policy';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
+import { BackendGateway } from '@backend/gateway';
+import { createSemanticPort } from '@backend/semantic';
+import {
+  chooseOption,
+  collectRefusals,
+  resolveConcepts,
+  SemanticConceptCache,
+  type ConceptResolution,
+  type FieldOutcome,
+} from '@semantic/index';
 
 const log = createLogger('background');
 
@@ -102,6 +113,22 @@ export default defineBackground(() => {
    */
   const pendingRuns = new PendingRunStore();
   const auditHistory = new AuditRepository();
+  const toolbarScans = new ToolbarScanStore();
+
+  /**
+   * The semantic fallback (see `@semantic`), wired HERE and only here.
+   *
+   * This is the composition root: `@semantic` declares the port it needs and
+   * `@backend` implements it, so neither package imports the other and no test
+   * in either can reach a socket by accident.
+   *
+   * Constructed unconditionally and cheaply. The gateway makes no request until
+   * asked, the cache reads no storage until queried, and a scan whose fields the
+   * deterministic pipeline fully understood produces an empty refusal queue and
+   * therefore touches neither.
+   */
+  const semanticCache = new SemanticConceptCache(store);
+  const semanticPort = createSemanticPort(new BackendGateway(store));
 
   /**
    * Storage readiness, tracked per worker instance.
@@ -128,17 +155,56 @@ export default defineBackground(() => {
 
   chrome.runtime.onInstalled.addListener((details) => {
     log.info(`Installed: ${details.reason}`);
+  });
 
-    // Clicking the toolbar icon opens the side panel. Configured here rather than
-    // in the manifest because `setPanelBehavior` is the only way to get the
-    // icon-click behaviour, and it must be re-applied after an update.
-    if (chrome.sidePanel?.setPanelBehavior !== undefined) {
-      chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error: unknown) => {
-        // Not fatal: the user can still open the panel from the extensions menu.
+  /**
+   * Make the toolbar click mean "open here and scan here".
+   *
+   * Why not `openPanelOnActionClick: true`? Chrome consumes that click to toggle
+   * the panel and does not dispatch `chrome.action.onClicked`. The click still
+   * grants `activeTab`, but the panel has no event telling it that access was
+   * restored, so the user lands in a two-step loop: click the icon, then click
+   * Scan. Handling the action ourselves preserves the same narrow permission
+   * model and lets the panel consume the click as the scan request too.
+   *
+   * `sidePanel.open()` must be CALLED synchronously from the action listener.
+   * The storage write starts beside it rather than being awaited first; awaiting
+   * would lose the browser's user-gesture token on some Chrome versions.
+   */
+  const openSidePanel = chrome.sidePanel?.open?.bind(chrome.sidePanel);
+  if (chrome.sidePanel?.setPanelBehavior !== undefined) {
+    chrome.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: openSidePanel === undefined })
+      .catch((error: unknown) => {
         log.warn('Could not set side panel behaviour', toAppError(error).message);
       });
-    }
-  });
+  }
+
+  if (openSidePanel !== undefined) {
+    chrome.action.onClicked.addListener((tab) => {
+      if (tab.id === undefined) return;
+      const tabId = tab.id;
+
+      const opening = openSidePanel({ tabId }).catch((error: unknown) => {
+        log.warn('Could not open the side panel', toAppError(error).message);
+      });
+      const queued = toolbarScans.request(tabId);
+
+      void Promise.all([opening, queued]).then(([, saved]) => {
+        if (!saved.ok) {
+          log.warn('Could not queue the toolbar scan', saved.error.code);
+          return;
+        }
+
+        // Fast path for a panel that was already open. A newly-created panel may
+        // not have mounted its listener yet; the session record above is the
+        // reliable fallback it consumes during mount.
+        void chrome.runtime
+          .sendMessage({ type: TOOLBAR_SCAN_SIGNAL, tabId })
+          .catch(() => undefined);
+      });
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Message handling
@@ -400,6 +466,15 @@ export default defineBackground(() => {
     let needsReview = 0;
     let unknown = 0;
 
+    /**
+     * What the deterministic pipeline concluded about each field, kept so the
+     * semantic fallback can see the REFUSALS. Collected during the loop rather
+     * than recomputed after it: a second run against the same profile could
+     * disagree with the first, and then the page and the history would describe
+     * different decisions.
+     */
+    const outcomes: FieldOutcome[] = [];
+
     for (const descriptor of request.fields) {
       // A failure on one field must never abort the batch. A single unusual
       // control should cost that control, not the other nineteen on the page.
@@ -412,6 +487,7 @@ export default defineBackground(() => {
         );
         actions.push(resolved.action);
         auditFields.push(resolved.audit);
+        if (resolved.outcome !== undefined) outcomes.push(resolved.outcome);
       } catch (error) {
         log.warn('Field resolution failed', descriptor.localId, toAppError(error).message);
         actions.push({
@@ -433,6 +509,11 @@ export default defineBackground(() => {
         });
       }
     }
+
+    // The semantic fallback, on the refusals only. Costs nothing - no storage
+    // read, no request - when the queue is empty, which is every form the
+    // deterministic pipeline already understood.
+    await applySemanticFallback(profile, outcomes, actions, auditFields);
 
     await stashScan(request, senderTabId, auditFields);
 
@@ -463,7 +544,7 @@ export default defineBackground(() => {
     descriptor: FieldDescriptor,
     learned: LearnedMappingIndex,
     entryIndexes: CollectionEntryIndexes,
-  ): { action: ResolvedFieldAction; audit: PendingFieldAudit } {
+  ): { action: ResolvedFieldAction; audit: PendingFieldAudit; outcome?: FieldOutcome } {
     // The `exact` scope, which is what a correction is keyed by - so a history
     // row and the rule the user later writes about it agree on the field.
     const fingerprint = computeFingerprints(descriptor).exact;
@@ -520,6 +601,9 @@ export default defineBackground(() => {
         // answer by hand, recorded with the text the form used, which is
         // exactly what a future alias or correction has to match.
         audit: auditFor({ mappingConfidence: 0, mappingSource: mapping.source, decidedAction: 'skip' }),
+        // The queue decides whether this refusal is the recoverable kind. It
+        // is not this function's business to know.
+        outcome: { descriptor, mapping },
       };
     }
 
@@ -564,6 +648,9 @@ export default defineBackground(() => {
         // from 'not recognised': one is a gap in the profile, the other a gap
         // in the mapping, and they need different fixes.
         audit: mappedAudit('skip'),
+        // Only `no_matching_option` will survive the queue; the rest mean the
+        // profile is incomplete, which no model can fix.
+        outcome: { descriptor, mapping, resolution },
       };
     }
 
@@ -601,6 +688,209 @@ export default defineBackground(() => {
       // remembering. See audit/types.ts.
       audit: mappedAudit(decided),
     };
+  }
+
+  /**
+   * The semantic fallback, applied to the fields the pipeline refused.
+   *
+   * REPLACES `skip` actions in place; it can never downgrade one. A field the
+   * deterministic pipeline decided to fill is not reconsidered here, and a
+   * field this pass cannot improve keeps the refusal it already had - which is
+   * what makes "with the network disabled, behaviour is byte-for-byte today's"
+   * true by construction rather than by testing every failure path.
+   *
+   * The ordering is the brief's, and each step is cheaper than the next:
+   *
+   *   queue     -> free. Empty on a form we understood, and then this returns
+   *                without reading storage or opening a socket.
+   *   stage 1   -> cache first, then ONE batched call for what is left.
+   *   resolve   -> the EXISTING resolver, unchanged.
+   *   stage 2   -> the deterministic scorer, then at most one call per field.
+   *   decideFill-> the EXISTING policy, unchanged. This is the entire safety
+   *                story and this function does not reimplement any of it.
+   *
+   * Every failure degrades to the refusal that was already there. Nothing here
+   * throws: a semantic pass that broke a scan would be far worse than one that
+   * did nothing.
+   */
+  async function applySemanticFallback(
+    profile: Parameters<typeof resolveValue>[0],
+    outcomes: readonly FieldOutcome[],
+    actions: ResolvedFieldAction[],
+    auditFields: PendingFieldAudit[],
+  ): Promise<void> {
+    const refusals = collectRefusals(outcomes);
+    if (refusals.length === 0) return;
+
+    try {
+      const byField = new Map(actions.map((action, index) => [action.localId, index]));
+      const descriptors = new Map(refusals.map((field) => [field.fieldId, field.descriptor]));
+
+      /** Overwrite a field's action and its history row together. */
+      const replace = (
+        localId: string,
+        action: ResolvedFieldAction,
+        audit: Partial<PendingFieldAudit>,
+      ): void => {
+        const index = byField.get(localId);
+        if (index === undefined) return;
+        actions[index] = action;
+
+        const row = auditFields[index];
+        if (row !== undefined) auditFields[index] = { ...row, ...audit };
+      };
+
+      // --- stage 1: what are these questions asking? ------------------------
+      const { resolutions } = await resolveConcepts({
+        fields: refusals,
+        port: semanticPort,
+        cache: semanticCache,
+      });
+
+      for (const concept of resolutions) {
+        const descriptor = descriptors.get(concept.fieldId);
+        if (descriptor === undefined) continue;
+        applyConcept(profile, descriptor, concept, replace);
+      }
+
+      // --- stage 2: our answer against this control's options ---------------
+      for (const field of refusals) {
+        if (field.kind !== 'no_matching_option' || field.profilePath === null) continue;
+        await applyOptionChoice(profile, field.descriptor, field.profilePath, replace);
+      }
+    } catch (error) {
+      // Unreachable by design - every module below returns a Result - so
+      // reaching it is a bug worth a log line, and the fields keep the
+      // refusals they already had.
+      log.warn('Semantic fallback failed; fields keep their refusals', toAppError(error).message);
+    }
+  }
+
+  /** One stage-1 concept, through the existing resolver and the existing policy. */
+  function applyConcept(
+    profile: Parameters<typeof resolveValue>[0],
+    descriptor: FieldDescriptor,
+    concept: ConceptResolution,
+    replace: (
+      localId: string,
+      action: ResolvedFieldAction,
+      audit: Partial<PendingFieldAudit>,
+    ) => void,
+  ): void {
+    const resolution = resolveValue(profile, concept.profilePath, descriptor);
+    // Understanding the question does not mean we have the answer. A profile
+    // gap is still a profile gap, and the existing skip explains it better than
+    // anything this pass could say.
+    if (!resolution.ok) return;
+
+    const decision = decideFill({
+      mappingConfidence: concept.confidence,
+      valueConfidence: resolution.resolved.confidence,
+      valueVerifiedByUser: resolution.resolved.verifiedByUser,
+      profilePath: concept.profilePath,
+      valueMissing: false,
+      controlHasValue: (descriptor.currentValue ?? '').trim().length > 0,
+    });
+    // 'autofill' is unreachable while `sourceScores.semantic` stays below
+    // `autofillThreshold`, which is by construction - but the mapping is
+    // written to honour whatever the policy says rather than to assume it.
+    if (decision === 'skip') return;
+
+    const optionValue = resolution.resolved.option?.value;
+    const decided = decision === 'autofill' ? ('fill' as const) : ('suggest' as const);
+
+    replace(
+      descriptor.localId,
+      {
+        localId: descriptor.localId,
+        action: decided,
+        profilePath: concept.profilePath,
+        mappingConfidence: concept.confidence,
+        // 'previously_seen' for a cache hit is the state the spec already
+        // defines for "the user has answered this exact question before".
+        knowledgeState: concept.origin === 'cache' ? 'previously_seen' : 'probable',
+        controlKind: descriptor.kind,
+        value: resolution.resolved.value,
+        ...(optionValue !== undefined ? { optionValue } : {}),
+        explanation: `${labelForPath(concept.profilePath)} (semantic${concept.origin === 'cache' ? ', remembered' : ''})`,
+      },
+      {
+        mappedProfilePath: concept.profilePath,
+        mappingConfidence: concept.confidence,
+        mappingSource: 'semantic',
+        decidedAction: decided,
+      },
+    );
+  }
+
+  /** One stage-2 option match, for a field whose concept was never in doubt. */
+  async function applyOptionChoice(
+    profile: Parameters<typeof resolveValue>[0],
+    descriptor: FieldDescriptor,
+    profilePath: string,
+    replace: (
+      localId: string,
+      action: ResolvedFieldAction,
+      audit: Partial<PendingFieldAudit>,
+    ) => void,
+  ): Promise<void> {
+    /**
+     * The value as TEXT, obtained by resolving against the same control with
+     * its options removed.
+     *
+     * Reuses the resolver's own scalar rendering rather than reaching into the
+     * profile here: dates and phone numbers have control-dependent renderings
+     * that this file has no business knowing about, and a second implementation
+     * of "how does this value read" is how the two would drift.
+     */
+    const { options: _options, ...withoutOptions } = descriptor;
+    const asText = resolveValue(profile, profilePath, withoutOptions);
+    if (!asText.ok || typeof asText.resolved.value !== 'string') return;
+
+    const chosen = await chooseOption({
+      fieldId: descriptor.localId,
+      value: asText.resolved.value,
+      options: descriptor.options ?? [],
+      port: semanticPort,
+    });
+    if (chosen.option === null) return;
+
+    const decision = decideFill({
+      // The MAPPING was never in doubt here - the cascade named this path with
+      // its own confidence, and only the option match failed. But the match is
+      // what this pass supplied, so it is scored as a semantic result: an
+      // option we chose rather than matched must be read by the user.
+      mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
+      valueConfidence: asText.resolved.confidence,
+      valueVerifiedByUser: asText.resolved.verifiedByUser,
+      profilePath,
+      valueMissing: false,
+      controlHasValue: (descriptor.currentValue ?? '').trim().length > 0,
+    });
+    if (decision === 'skip') return;
+
+    const decided = decision === 'autofill' ? ('fill' as const) : ('suggest' as const);
+
+    replace(
+      descriptor.localId,
+      {
+        localId: descriptor.localId,
+        action: decided,
+        profilePath,
+        mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
+        knowledgeState: 'probable',
+        controlKind: descriptor.kind,
+        value: chosen.option.value,
+        optionValue: chosen.option.value,
+        explanation: `${labelForPath(profilePath)} (matched to "${chosen.option.label}")`,
+      },
+      {
+        mappedProfilePath: profilePath,
+        mappingConfidence: DEFAULT_CONFIDENCE_POLICY.sourceScores.semantic,
+        mappingSource: 'semantic',
+        decidedAction: decided,
+      },
+    );
   }
 
   /**

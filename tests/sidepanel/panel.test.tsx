@@ -212,6 +212,22 @@ describe('side panel - reporting what happened', () => {
   });
 });
 
+describe('side panel - toolbar recovery', () => {
+  it('uses the toolbar invocation to scan automatically after access is restored', async () => {
+    await chrome.storage.local.set({
+      'aa:session:toolbarScan:7': { tabId: 7, requestedAt: Date.now() },
+    });
+    reply('CONTENT_SCAN', { ok: true, actions: [action({})], fieldsDetected: 1 });
+
+    // This is the closed-panel path: the background stored the click before
+    // opening the panel, and the newly mounted panel consumes it immediately.
+    render(<App />);
+
+    await screen.findByText(/fields detected/i);
+    expect(sent.some((entry) => entry.message['type'] === 'CONTENT_SCAN')).toBe(true);
+  });
+});
+
 describe('side panel - a resume the user has not saved', () => {
   it('says so, and does not send an attach action that can only fail', async () => {
     await scanWith([
