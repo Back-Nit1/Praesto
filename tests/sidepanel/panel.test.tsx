@@ -434,3 +434,50 @@ describe('side panel - frames', () => {
 });
 
 vi.setConfig({ testTimeout: 10_000 });
+
+/**
+ * Recovery.
+ *
+ * The panel is a window onto a tab, and it gets closed constantly - to read the
+ * job description, to check a date, because the screen is small. Before this,
+ * closing it destroyed the record of which fields had failed, and finding them
+ * again meant re-reading the whole form by hand.
+ */
+describe('side panel - recovering the last scan', () => {
+  it('brings back what was filled and what failed, and says the list is a record', async () => {
+    await scanWith([action({ localId: 'f_1' }), action({ localId: 'f_2' })]);
+
+    reply('CONTENT_FILL', {
+      ok: true,
+      outcomes: [
+        { localId: 'f_1', attempted: true, verified: true, adapter: 'NativeText' },
+        { localId: 'f_2', attempted: true, verified: false, failureReason: 'rejected' },
+      ],
+    });
+    click(/fill 2 safe fields/i);
+    await screen.findByText(/1 filled, 1 could not be filled/i);
+
+    // The user closes the panel and opens it again on the same tab.
+    cleanup();
+    render(<App />);
+
+    // The failure is still there to be found...
+    await screen.findByText(/the page refused the value/i);
+    // ...and the panel does not pass a stored list off as a live reading.
+    expect(screen.getByText(/restored from your scan at/i)).toBeTruthy();
+  });
+
+  it('does not restore a scan onto a different posting on the same site', async () => {
+    await scanWith([action({ localId: 'f_1' })]);
+
+    // Every posting on a careers site shares a hostname; only the address
+    // distinguishes them, and a field list is meaningless against the wrong one.
+    navigate(7, 'https://boards.greenhouse.io/acme/jobs/2');
+
+    cleanup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: /scan this page/i });
+    expect(screen.queryByText(/fields detected/i)).toBeNull();
+  });
+});

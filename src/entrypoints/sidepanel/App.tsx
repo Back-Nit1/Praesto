@@ -46,6 +46,13 @@ import {
   type ResumePayload,
 } from '@shared/page-protocol';
 import { createLogger } from '@shared/logging';
+import { PanelSnapshotStore } from './session-snapshot';
+import {
+  activeTarget,
+  sameTarget,
+  targetFromTab,
+  type ScanTarget,
+} from './scan-target';
 import {
   classifyPage,
   hasAccess,
@@ -68,6 +75,11 @@ import { ResumeDocumentStore } from '@storage/documents';
 /** Matches the key written by the options page's Resume tab. */
 const DEFAULT_RESUME_KEY = 'aa:resume:defaultId';
 const settings = new ChromeLocalStore();
+/**
+ * The panel's own memory, so closing it does not destroy the record of what
+ * was filled and what failed. See session-snapshot.ts.
+ */
+const snapshots = new PanelSnapshotStore();
 const resumes = new ResumeDocumentStore();
 const profiles = new StoredProfileRepository(settings);
 
@@ -102,70 +114,6 @@ async function loadResumePayload(): Promise<ResumePayload | undefined> {
   }
 
   return { name: file.value.name, type: file.value.type, base64: btoa(binary) };
-}
-
-/**
- * SECURITY: only ordinary web pages may be scanned or filled.
- *
- * Deliberately an ALLOWLIST of schemes rather than a denylist of chrome:// and
- * friends. A denylist has to be right about every scheme a browser will ever
- * add; an allowlist is wrong only in the safe direction (an unusual page is
- * not scanned).
- */
-function isScannableUrl(url: string | undefined): boolean {
-  if (url === undefined) return false;
-  try {
-    const scheme = new URL(url).protocol;
-    return scheme === 'https:' || scheme === 'http:';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * WHICH PAGE a scan belongs to.
- *
- * The hostname alone was not enough, and the gap was not theoretical: every
- * application on a careers site shares one hostname, so scanning
- * `boards.greenhouse.io/acme/jobs/1`, navigating to `.../jobs/2` and clicking
- * Fill passed the hostname check and then filled the SECOND application from
- * the FIRST one's field list - by localId, against elements that no longer
- * mean what they meant. The tab id matters for the same reason in the other
- * direction: the panel outlives the tab it was opened over, and the user can
- * switch tabs mid-application.
- *
- * The URL is compared without its fragment. `#section` is a scroll position,
- * not a different page, and treating it as one would invalidate a scan every
- * time the form scrolled itself.
- */
-interface ScanTarget {
-  tabId: number;
-  /** Full URL, fragment stripped. */
-  url: string;
-  /** Hostname, for the one thing the user actually needs to read. */
-  host: string;
-}
-
-function targetFromTab(tab: chrome.tabs.Tab | undefined): ScanTarget | undefined {
-  if (tab?.id === undefined || !isScannableUrl(tab.url)) return undefined;
-  try {
-    const parsed = new URL(tab.url ?? '');
-    parsed.hash = '';
-    return { tabId: tab.id, url: parsed.href, host: parsed.hostname };
-  } catch {
-    return undefined;
-  }
-}
-
-/** The page the user is looking at right now. */
-async function activeTarget(): Promise<ScanTarget | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return targetFromTab(tab);
-}
-
-/** Same tab, same address - the two conditions for a scan still being valid. */
-function sameTarget(a: ScanTarget | undefined, b: ScanTarget | undefined): boolean {
-  return a !== undefined && b !== undefined && a.tabId === b.tabId && a.url === b.url;
 }
 
 const log = createLogger('sidepanel');
@@ -221,6 +169,12 @@ type PanelState =
        * fill addressed to the top frame would find nothing there.
        */
       frameByLocalId: Record<string, number>;
+      /**
+       * Set only when these rows came back from storage rather than from a
+       * scan just performed. The panel says so out loud: a restored list
+       * describes the page as it was, and the page may have moved on.
+       */
+      restoredAt?: number;
     }
   | { kind: 'error'; message: string; code?: string | undefined; origin?: string | undefined };
 
@@ -279,6 +233,70 @@ export function App(): ReactNode {
   }, [target]);
 
   /**
+   * Restore the last scan for this tab, once, on open.
+   *
+   * THE BEHAVIOUR THIS EXISTS FOR: a user fills eighteen questions, closes the
+   * panel to read the job description, and reopens it. Before this, the panel
+   * came back empty and the two fields that failed were unfindable without
+   * re-reading the whole form - which is the exact work the product exists to
+   * remove.
+   *
+   * Restores rows only, never actions: nothing is filled, rescanned or
+   * re-decided here. The user sees what happened and chooses what to do next,
+   * which is the same rule the rest of this panel follows.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const current = await activeTarget();
+      if (current === undefined || cancelled) return;
+
+      const restored = await snapshots.load(current);
+      if (cancelled || !restored.ok || restored.value === undefined) return;
+
+      const snapshot = restored.value;
+      setTarget(current);
+      setState({
+        kind: 'scanned',
+        actions: snapshot.actions,
+        fieldsDetected: snapshot.fieldsDetected,
+        outcomes: snapshot.outcomes,
+        frameByLocalId: snapshot.frameByLocalId,
+        restoredAt: snapshot.savedAt,
+      });
+    })();
+
+    // The panel can be closed mid-read. Without this the async work lands on
+    // an unmounted component and React logs a warning the user cannot act on.
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Persist the scan whenever it changes.
+   *
+   * Driven by state rather than called at each transition, so a path that
+   * updates `outcomes` and forgets to save cannot exist. `restoredAt` is
+   * carried through unchanged: re-saving a restored scan must not make it look
+   * freshly scanned, or the note explaining that it is old would disappear on
+   * the first fill after a restore.
+   */
+  useEffect(() => {
+    if (target === undefined || state.kind !== 'scanned') return;
+
+    void snapshots.save({
+      target,
+      savedAt: state.restoredAt ?? Date.now(),
+      actions: state.actions,
+      fieldsDetected: state.fieldsDetected,
+      outcomes: state.outcomes,
+      frameByLocalId: state.frameByLocalId,
+    });
+  }, [state, target]);
+
+  /**
    * Drop a scan when the page it describes is gone.
    *
    * A field list is a set of `localId`s that only mean anything to the
@@ -295,6 +313,10 @@ export function App(): ReactNode {
     if (target === undefined) return undefined;
 
     const invalidate = (): void => {
+      // The stored copy goes with it. A snapshot the panel would refuse to
+      // restore anyway is dead weight in session storage, and leaving it there
+      // means the next scan of this tab briefly has two records of itself.
+      void snapshots.clear(target.tabId);
       setTarget(undefined);
       setPageChanged(false);
       setState({ kind: 'idle' });
@@ -848,6 +870,7 @@ export function App(): ReactNode {
         <ScanReport
           actions={state.actions}
           fieldsDetected={state.fieldsDetected}
+          {...(state.restoredAt !== undefined ? { restoredAt: state.restoredAt } : {})}
           outcomes={state.outcomes}
           busy={busy}
           onFill={(requested) => void handleFill(requested)}
@@ -1094,11 +1117,23 @@ function ScanError({
  * count. Sorting by page order would bury the three fields that matter among
  * the thirteen that do not.
  */
+/**
+ * A wall-clock time the user can match against their own memory.
+ *
+ * Locale-formatted rather than an ISO string or a "3 hours ago": the panel is
+ * telling them which of their own actions this record came from, and "10:42"
+ * is how a person holds that.
+ */
+function formatClockTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
 function ScanReport({
   actions,
   fieldsDetected,
   outcomes,
   busy,
+  restoredAt,
   onFill,
   onRescan,
   onCorrect,
@@ -1107,6 +1142,8 @@ function ScanReport({
   fieldsDetected: number;
   outcomes: Record<string, FieldFillReport>;
   busy: boolean;
+  /** Epoch ms, present only when these rows came back from storage. */
+  restoredAt?: number;
   onFill: (actions: ResolvedFieldAction[]) => void;
   onRescan: () => void;
   onCorrect: (localId: string, profilePath: string | null, scope: MappingScope) => void;
@@ -1190,6 +1227,15 @@ function ScanReport({
           </span>
         </div>
 
+        {/* A restored list describes the page AS IT WAS. Saying so is the same
+            honesty the rest of this panel is built on: the user is looking at a
+            record, not a live reading, and the form may have moved on since. */}
+        {restoredAt !== undefined && (
+          <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--ink-3)]">
+            {`Restored from your scan at ${formatClockTime(restoredAt)}. Rescan if the form has changed since.`}
+          </p>
+        )}
+
         {/* The bar is aria-hidden because the key below it is the same
             information as text, and a screen reader should hear it once. */}
         <div className="ledger mt-3" aria-hidden="true">
@@ -1212,18 +1258,28 @@ function ScanReport({
           ))}
         </dl>
 
-        <Button
-          className="mt-4 w-full"
-          onClick={() => onFill(remainingReady)}
-          disabled={busy || remainingReady.length === 0}
-        >
-          {remainingReady.length === 0 && attempted(ready).length > 0
-            ? 'Safe fields done'
-            : `Fill ${remainingReady.length} safe field${remainingReady.length === 1 ? '' : 's'}`}
-        </Button>
-        <Button className="mt-2 w-full" variant="ghost" onClick={onRescan} disabled={busy}>
-          Rescan
-        </Button>
+        {/* Once every safe field has been attempted there is nothing left for
+            a primary button to do, so it stops being one. A greyed-out slab
+            across the widest part of the panel is the loudest element on the
+            screen advertising the one thing you cannot press. */}
+        {remainingReady.length === 0 && attempted(ready).length > 0 ? (
+          <Button className="mt-4 w-full" variant="secondary" onClick={onRescan} disabled={busy}>
+            Rescan
+          </Button>
+        ) : (
+          <>
+            <Button
+              className="mt-4 w-full"
+              onClick={() => onFill(remainingReady)}
+              disabled={busy || remainingReady.length === 0}
+            >
+              {`Fill ${remainingReady.length} safe field${remainingReady.length === 1 ? '' : 's'}`}
+            </Button>
+            <Button className="mt-2 w-full" variant="ghost" onClick={onRescan} disabled={busy}>
+              Rescan
+            </Button>
+          </>
+        )}
 
         {/* The form is never submitted for the user. Saying so where the fill
             button is, rather than in a badge at the top, is part of the
@@ -1440,6 +1496,7 @@ function ActionRow({
   );
 
   const state = rowState(action, outcome);
+  const failed = outcome !== undefined && !outcome.verified;
 
   /**
    * A suggestion can be accepted; a value already written cannot be re-offered.
@@ -1454,7 +1511,7 @@ function ActionRow({
 
   return (
     <li className={`field-row field-row--${state}`}>
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           {/*
             THE ANSWER IS THE HEADLINE, NOT THE QUESTION.
@@ -1471,47 +1528,53 @@ function ActionRow({
             <span className="field-value" title={value}>
               {value}
             </span>
+          ) : action.action === 'attach_resume' ? (
+            <span className="field-value">Your saved resume</span>
           ) : (
-            <span className="field-value text-[var(--ink-3)]">—</span>
+            <span className="field-value" style={{ color: 'var(--ink-3)' }}>
+              Nothing will be entered
+            </span>
           )}
         </div>
+        {/* "Change" rides the top line with the badge rather than taking a
+            line of its own. It is present on every one of what can be twenty
+            rows, and a dedicated row for it added a third of the panel's
+            height to say nothing. */}
+        <button
+          type="button"
+          onClick={() => setEditing((current) => !current)}
+          className="-my-0.5 flex-none rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold text-[var(--ink-2)] transition-colors hover:text-[var(--ink)]"
+          aria-expanded={editing}
+        >
+          {editing ? 'Cancel' : 'Change'}
+        </button>
         <StateBadge state={state} />
       </div>
 
-      <div className="mt-1.5 flex items-end justify-between gap-2">
-        {/*
-          WHERE THIS ANSWER CAME FROM.
+      <p
+        className="field-provenance"
+        /* A failure is not a footnote. When the page rejected the value, the
+           line that says so is the one thing in the row the user has to read,
+           so it is the only text in the list that gets the failure colour. */
+        style={failed ? { color: 'var(--danger)' } : undefined}
+      >
+        {describeProvenance(action, outcome)}
+      </p>
 
-          `knowledgeState` - the five-way distinction the README calls the
-          heart of the product - was already computed by the mapper, already
-          travelled to the panel on every action, and was already thrown away
-          unread. Showing it is the difference between "trust us" and "here is
-          why". A row that says "You corrected this before" is a row the user
-          can audit.
-        */}
-        <span className="field-provenance">{describeProvenance(action, outcome)}</span>
-
-        <span className="flex flex-none items-center gap-1.5">
-          {canAccept && (
-            <button
-              type="button"
-              onClick={() => onFill([asAcceptedFill(action)])}
-              disabled={busy}
-              className="rounded-md border border-[var(--rule)] bg-[var(--paper-2)] px-2 py-1 text-[10.5px] font-semibold text-[var(--ink)] transition-colors hover:border-[var(--rule-2)] disabled:opacity-40"
-            >
-              Fill this
-            </button>
-          )}
+      {/* A suggestion is the only row with a decision to make, so it is the
+          only row that spends a line on a button. */}
+      {canAccept && (
+        <div className="mt-2 flex justify-end">
           <button
             type="button"
-            onClick={() => setEditing((current) => !current)}
-            className="px-1 py-1 text-[10.5px] font-semibold text-[var(--ink-2)] transition-colors hover:text-[var(--ink)]"
-            aria-expanded={editing}
+            onClick={() => onFill([asAcceptedFill(action)])}
+            disabled={busy}
+            className="rounded-md border border-[var(--rule)] bg-[var(--paper-2)] px-2.5 py-1 text-[10.5px] font-semibold text-[var(--ink)] transition-colors hover:border-[var(--rule-2)] disabled:opacity-40"
           >
-            {editing ? 'Cancel' : 'Change'}
+            Fill this
           </button>
-        </span>
-      </div>
+        </div>
+      )}
 
       {editing && (
         <div className="mt-2.5 space-y-3 rounded-lg border border-[var(--rule)] bg-[var(--paper-2)] p-3">
