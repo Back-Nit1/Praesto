@@ -157,25 +157,49 @@ export const dateText = (value: ProfileValue<NormalizedDate>): string => {
 // Repeated entries
 // ---------------------------------------------------------------------------
 
+/**
+ * The parts of an entry card that differ between the two screens that use it.
+ *
+ * The profile editor passes a removal control; the resume review screen passes
+ * a checkbox and a duplicate note instead. Keeping this as one forwarded bag
+ * means the FIELDS - which are the part that must not diverge - stay identical
+ * in both places.
+ */
+export interface EntryChrome {
+  onRemove?: () => void;
+  lead?: ReactNode;
+  note?: ReactNode;
+  defaultOpen?: boolean;
+}
+
+/** Spread the chrome onto an EntryCard, omitting what was not provided. */
+function chromeProps(chrome: EntryChrome): EntryChrome {
+  const props: EntryChrome = {};
+  if (chrome.onRemove !== undefined) props.onRemove = chrome.onRemove;
+  if (chrome.lead !== undefined) props.lead = chrome.lead;
+  if (chrome.note !== undefined) props.note = chrome.note;
+  if (chrome.defaultOpen !== undefined) props.defaultOpen = chrome.defaultOpen;
+  return props;
+}
+
 export function EducationEntry({
   entry,
   position,
   onChange,
-  onRemove,
+  ...chrome
 }: {
   entry: Education;
   position: number;
   onChange: (mutate: (entry: Education) => Education) => void;
-  onRemove: () => void;
-}): ReactNode {
+} & EntryChrome): ReactNode {
   const set = <K extends keyof Education>(field: K, value: Education[K]): void =>
     onChange((current) => ({ ...current, [field]: value }));
 
   return (
     <EntryCard
       title={entry.institution.value ?? `School ${position}`}
-      onRemove={onRemove}
       removeLabel="Remove this school"
+      {...chromeProps(chrome)}
     >
       <Field
         label="School"
@@ -228,13 +252,12 @@ export function EmploymentEntry({
   entry,
   position,
   onChange,
-  onRemove,
+  ...chrome
 }: {
   entry: Employment;
   position: number;
   onChange: (mutate: (entry: Employment) => Employment) => void;
-  onRemove: () => void;
-}): ReactNode {
+} & EntryChrome): ReactNode {
   const set = <K extends keyof Employment>(field: K, value: Employment[K]): void =>
     onChange((current) => ({ ...current, [field]: value }));
 
@@ -243,8 +266,8 @@ export function EmploymentEntry({
   return (
     <EntryCard
       title={entry.company.value ?? `Job ${position}`}
-      onRemove={onRemove}
       removeLabel="Remove this job"
+      {...chromeProps(chrome)}
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
@@ -311,21 +334,20 @@ export function ProjectEntry({
   entry,
   position,
   onChange,
-  onRemove,
+  ...chrome
 }: {
   entry: Project;
   position: number;
   onChange: (mutate: (entry: Project) => Project) => void;
-  onRemove: () => void;
-}): ReactNode {
+} & EntryChrome): ReactNode {
   const set = <K extends keyof Project>(field: K, value: Project[K]): void =>
     onChange((current) => ({ ...current, [field]: value }));
 
   return (
     <EntryCard
       title={entry.name.value ?? `Project ${position}`}
-      onRemove={onRemove}
       removeLabel="Remove this project"
+      {...chromeProps(chrome)}
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
@@ -515,18 +537,33 @@ export function EntryCard({
   title,
   removeLabel,
   onRemove,
+  lead,
+  note,
+  defaultOpen = true,
   children,
 }: {
   title: string;
-  removeLabel: string;
-  onRemove: () => void;
+  /**
+   * Removal is OPTIONAL. On the profile screen an entry is something the user
+   * owns and can delete; on the resume review screen it is a proposal that has
+   * not been committed to anything yet, so there is nothing to remove - the
+   * checkbox in `lead` decides whether it is ever kept at all.
+   */
+  removeLabel?: string;
+  onRemove?: () => void;
+  /** Rendered before the expand control - a checkbox, on the review screen. */
+  lead?: ReactNode;
+  /** A row under the header that stays visible while the card is collapsed. */
+  note?: ReactNode;
+  defaultOpen?: boolean;
   children: ReactNode;
 }): ReactNode {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-soft)] p-3.5 transition hover:border-[var(--app-border-strong)]">
       <div className="flex items-center justify-between gap-2">
+        {lead}
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
@@ -538,14 +575,17 @@ export function EntryCard({
           </span>
           <span className="truncate">{title}</span>
         </button>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-[--app-danger] transition hover:bg-red-500/8"
-        >
-          {removeLabel}
-        </button>
+        {onRemove !== undefined && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-[--app-danger] transition hover:bg-red-500/8"
+          >
+            {removeLabel}
+          </button>
+        )}
       </div>
+      {note}
       {open && <div className="mt-4 space-y-3.5 border-t border-[var(--app-border)] pt-4">{children}</div>}
     </div>
   );

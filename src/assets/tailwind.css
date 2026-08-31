@@ -6,73 +6,146 @@
  *
  * The design tokens below are defined once and used by both extension surfaces
  * (side panel and options page) so they cannot drift apart visually.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ONE RULE THIS DESIGN IS BUILT ON
+ *
+ *     Colour is a claim about truth. Nothing else in this product gets colour.
+ *
+ * The whole value of the extension is that you can tell, at a glance, which of
+ * your answers it stands behind and which it refuses to guess at. If the
+ * chrome around that signal is also coloured - a violet brand accent, a teal
+ * gradient, a tinted hero - then colour stops meaning anything and the one
+ * signal that has to be unmissable becomes just more decoration.
+ *
+ * So: the chassis is achromatic ink on grey stock. The primary button is ink,
+ * not a brand hue. Focus rings are ink. The only saturated pixels on either
+ * surface belong to the four trust states, and a coloured pixel therefore
+ * always answers the same question: how much does it know?
+ *
+ * The previous palette failed this twice over. Its accent (#6558e8) and its
+ * "high confidence" state (oklch 250) were the same blue-violet, so the
+ * product's second-most-important state was the same colour as every button,
+ * kicker and icon on screen.
+ * ---------------------------------------------------------------------------
  */
 @import 'tailwindcss';
 
 @theme {
-  /* Semantic colours for the four field states in spec section 9. Named for
-     MEANING, not appearance, so a future restyle changes one line here rather
-     than every component that renders a state badge. */
-  --color-state-verified: oklch(0.62 0.15 155);
-  --color-state-confident: oklch(0.6 0.13 250);
-  --color-state-review: oklch(0.72 0.15 75);
-  --color-state-missing: oklch(0.6 0.01 260);
+  /* The four field states from spec section 9. Named for MEANING, not
+     appearance, so a future restyle changes one line here rather than every
+     component that renders a state badge.
+
+     Chroma is deliberately low. These sit on white and on near-black, and a
+     state colour that only works on one of them is a state colour that lies to
+     half the users. */
+  --color-state-verified: oklch(0.52 0.115 158);
+  --color-state-confident: oklch(0.5 0.11 248);
+  --color-state-review: oklch(0.55 0.13 62);
+  --color-state-missing: oklch(0.55 0.008 260);
 }
 
 /* -------------------------------------------------------------------------
    Product foundation
-
-   The extension used to inherit Tailwind's neutral defaults almost verbatim.
-   That made both surfaces look like debug tooling: flat black/white canvases,
-   thin borders and controls with no hierarchy. These tokens establish one
-   visual voice without adding a font download or a single remote asset.
    ------------------------------------------------------------------------- */
 :root {
   color-scheme: light;
-  font-family:
-    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Two faces, and the split between them carries meaning.
+
+     --font-ui is OUR voice: labels, headings, buttons, explanations.
+     --font-data is YOUR data: every applicant value, every count, every
+     hostname. Monospace because those strings go into a real application
+     character for character, and setting them in the same face as our prose
+     invites you to skim them. You are meant to read them.
+
+     Both are system stacks. This extension ships no remote asset and makes no
+     network request, and a webfont would quietly break both. */
+  --font-ui:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  --font-data: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  font-family: var(--font-ui);
   font-synthesis: none;
-  --app-bg: #f4f3fb;
-  --app-bg-raised: rgba(255, 255, 255, 0.82);
-  --app-panel: #ffffff;
-  --app-panel-soft: #f8f7fc;
-  --app-text: #19182a;
-  --app-muted: #716f82;
-  --app-faint: #9895a7;
-  --app-border: rgba(46, 42, 75, 0.11);
-  --app-border-strong: rgba(71, 61, 131, 0.2);
-  --app-accent: #6558e8;
-  --app-accent-strong: #4f42d3;
-  --app-accent-soft: #eeebff;
-  --app-teal: #20a58e;
-  --app-success: #18866f;
-  --app-warning: #b56b18;
-  --app-danger: #c64852;
-  --app-shadow: 0 18px 50px rgba(43, 35, 86, 0.08);
-  --app-shadow-soft: 0 7px 24px rgba(43, 35, 86, 0.06);
+
+  /* Chassis. Grey stock, ink, two steps of quieter ink, hairlines. */
+  --ground: #e8eaee;
+  --paper: #ffffff;
+  --paper-2: #f4f5f8;
+  --ink: #14161b;
+  --ink-2: #545c69;
+  --ink-3: #868e9c;
+  --rule: rgba(20, 22, 27, 0.11);
+  --rule-2: rgba(20, 22, 27, 0.2);
+
+  /* The primary action is ink, not a brand colour. See the rule at the top. */
+  --action: #14161b;
+  --action-hover: #2b2f38;
+  --on-action: #ffffff;
+
+  /* The four states, plus their tints. `-wash` is for a badge or rail
+     background; `-line` for its border. */
+  --s-verified: var(--color-state-verified);
+  --s-verified-wash: oklch(0.52 0.115 158 / 0.1);
+  --s-verified-line: oklch(0.52 0.115 158 / 0.26);
+  --s-confident: var(--color-state-confident);
+  --s-confident-wash: oklch(0.5 0.11 248 / 0.1);
+  --s-confident-line: oklch(0.5 0.11 248 / 0.26);
+  --s-review: var(--color-state-review);
+  --s-review-wash: oklch(0.55 0.13 62 / 0.12);
+  --s-review-line: oklch(0.55 0.13 62 / 0.3);
+  --s-unknown: var(--ink-3);
+  --s-unknown-wash: rgba(20, 22, 27, 0.06);
+  --s-unknown-line: rgba(20, 22, 27, 0.14);
+
+  /* Failure is not one of the four states - it is the absence of an outcome we
+     promised - so it gets its own colour and is used nowhere else. */
+  --danger: oklch(0.51 0.17 25);
+  --danger-wash: oklch(0.51 0.17 25 / 0.1);
+  --danger-line: oklch(0.51 0.17 25 / 0.28);
+
+  --lift: 0 1px 2px rgba(20, 22, 27, 0.05), 0 8px 24px rgba(20, 22, 27, 0.05);
+  --lift-soft: 0 1px 2px rgba(20, 22, 27, 0.04);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --app-bg: #111117;
-    --app-bg-raised: rgba(28, 27, 38, 0.84);
-    --app-panel: #1b1a23;
-    --app-panel-soft: #211f2a;
-    --app-text: #f5f3ff;
-    --app-muted: #a7a3b6;
-    --app-faint: #777384;
-    --app-border: rgba(222, 216, 255, 0.09);
-    --app-border-strong: rgba(172, 160, 255, 0.22);
-    --app-accent: #8d80ff;
-    --app-accent-strong: #aa9fff;
-    --app-accent-soft: rgba(118, 99, 255, 0.14);
-    --app-teal: #51d5bc;
-    --app-success: #65d4b8;
-    --app-warning: #f0b865;
-    --app-danger: #ff7f88;
-    --app-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
-    --app-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.2);
+
+    --ground: #0b0c0f;
+    --paper: #15171c;
+    --paper-2: #1b1e24;
+    --ink: #edeff3;
+    --ink-2: #99a1ae;
+    --ink-3: #6a7280;
+    --rule: rgba(237, 239, 243, 0.1);
+    --rule-2: rgba(237, 239, 243, 0.2);
+
+    --action: #edeff3;
+    --action-hover: #ffffff;
+    --on-action: #101216;
+
+    /* Lifted for dark ground. Same hues, same meanings. */
+    --color-state-verified: oklch(0.79 0.14 158);
+    --color-state-confident: oklch(0.77 0.11 248);
+    --color-state-review: oklch(0.81 0.13 70);
+    --color-state-missing: oklch(0.68 0.01 260);
+
+    --s-verified-wash: oklch(0.79 0.14 158 / 0.13);
+    --s-verified-line: oklch(0.79 0.14 158 / 0.3);
+    --s-confident-wash: oklch(0.77 0.11 248 / 0.13);
+    --s-confident-line: oklch(0.77 0.11 248 / 0.3);
+    --s-review-wash: oklch(0.81 0.13 70 / 0.13);
+    --s-review-line: oklch(0.81 0.13 70 / 0.3);
+    --s-unknown-wash: rgba(237, 239, 243, 0.07);
+    --s-unknown-line: rgba(237, 239, 243, 0.16);
+
+    --danger: oklch(0.74 0.15 22);
+    --danger-wash: oklch(0.74 0.15 22 / 0.13);
+    --danger-line: oklch(0.74 0.15 22 / 0.3);
+
+    --lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.3);
+    --lift-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -88,8 +161,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--app-bg);
-  color: var(--app-text);
+  background: var(--ground);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -98,6 +171,7 @@ input,
 textarea,
 select {
   font: inherit;
+  color: inherit;
 }
 
 button,
@@ -106,84 +180,82 @@ select {
   -webkit-tap-highlight-color: transparent;
 }
 
-::selection {
-  background: color-mix(in srgb, var(--app-accent) 28%, transparent);
+/* Every count, every applicant value. Tabular so a column of numbers lines up
+   and a changing count does not make the row jump. */
+.data {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
-/* A small, ownable mark: two application cards moving through a verified
-   checkpoint. It is CSS rather than an image so it stays sharp at 16–48 px. */
+/* One focus treatment, everywhere, in ink. Visible on both grounds without
+   spending a colour that is supposed to mean something else. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+/* The mark: one cell filled, one cell deliberately left empty.
+   That is the entire product in two squares - it answers what it knows and
+   leaves the rest blank rather than guessing - and it stays legible at 16 px
+   because it is two rectangles and a hairline. */
 .brand-mark {
   position: relative;
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 12px;
-  background:
-    radial-gradient(circle at 78% 18%, rgba(82, 224, 194, 0.92), transparent 28%),
-    linear-gradient(145deg, #7769ff 0%, #4d3ac6 68%, #322473 100%);
-  box-shadow: 0 9px 26px rgba(83, 65, 211, 0.28);
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  border: 1.5px solid var(--ink);
+  border-radius: 7px;
 }
 
 .brand-mark::before,
 .brand-mark::after {
-  position: absolute;
-  width: 13px;
-  height: 17px;
   content: "";
-  border: 1.5px solid rgba(255, 255, 255, 0.92);
-  border-radius: 3px;
-  transform: rotate(-8deg) translate(-3px, 1px);
+  border-radius: 1.5px;
+}
+
+.brand-mark::before {
+  background: var(--ink);
 }
 
 .brand-mark::after {
-  opacity: 0.52;
-  transform: rotate(8deg) translate(4px, -2px);
+  border: 1.5px solid var(--ink);
+  opacity: 0.32;
 }
 
 .brand-mark--small {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+  width: 22px;
+  height: 22px;
+  padding: 2.5px;
+  border-radius: 6px;
 }
 
-.brand-mark--small::before,
-.brand-mark--small::after {
-  width: 11px;
-  height: 14px;
+/* Surfaces --------------------------------------------------------------- */
+.surface-card {
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--lift-soft);
 }
 
 /* Options workspace ------------------------------------------------------- */
 .options-shell {
-  position: relative;
   min-height: 100vh;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 87% -8%, rgba(118, 98, 255, 0.16), transparent 32rem),
-    radial-gradient(circle at 12% 88%, rgba(40, 184, 157, 0.1), transparent 34rem),
-    var(--app-bg);
-}
-
-.options-shell::before {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: "";
-  opacity: 0.2;
-  background-image: radial-gradient(var(--app-border-strong) 0.65px, transparent 0.65px);
-  background-size: 18px 18px;
-  mask-image: linear-gradient(to bottom, black, transparent 75%);
+  background: var(--ground);
 }
 
 .options-layout {
-  position: relative;
-  z-index: 1;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -193,54 +265,45 @@ select {
   display: flex;
   height: 100vh;
   flex-direction: column;
-  padding: 28px 20px 22px;
-  border-right: 1px solid var(--app-border);
-  background: color-mix(in srgb, var(--app-bg-raised) 88%, transparent);
-  backdrop-filter: blur(22px);
+  padding: 22px 16px 18px;
+  border-right: 1px solid var(--rule);
+  background: var(--paper);
 }
 
 .options-main {
   min-width: 0;
-  padding: 34px clamp(28px, 4vw, 68px) 80px;
+  padding: 30px clamp(22px, 4vw, 56px) 80px;
 }
 
 .options-workspace {
-  width: min(1120px, 100%);
+  width: min(1060px, 100%);
   margin: 0 auto;
 }
 
 .workspace-topbar {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 28px;
-}
-
-.workspace-kicker {
-  margin-bottom: 8px;
-  color: var(--app-accent);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+  padding-bottom: 18px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--rule);
 }
 
 .workspace-title {
   margin: 0;
-  font-family: "Avenir Next", Inter, ui-sans-serif, sans-serif;
-  font-size: clamp(28px, 3vw, 40px);
-  font-weight: 680;
-  letter-spacing: -0.04em;
-  line-height: 1.05;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
 }
 
 .workspace-subtitle {
-  max-width: 630px;
-  margin: 10px 0 0;
-  color: var(--app-muted);
-  font-size: 14px;
-  line-height: 1.65;
+  max-width: 62ch;
+  margin: 7px 0 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.6;
 }
 
 .workspace-actions {
@@ -251,88 +314,48 @@ select {
   gap: 8px;
 }
 
+/* Sections declare their own width. The previous rule selected them by
+   nth-child, so inserting one section silently re-laid out every section after
+   it - and left "Skills" alone in a half-width column beside a hole. */
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 18px;
-  max-width: none;
-}
-
-.profile-grid > section:nth-child(4),
-.profile-grid > section:nth-child(5),
-.profile-grid > section:nth-child(6),
-.profile-grid > section:nth-child(8),
-.profile-grid > section:nth-child(9),
-.profile-grid > section:nth-child(10) {
-  grid-column: 1 / -1;
-}
-
-.surface-card {
-  border: 1px solid var(--app-border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--app-panel) 94%, transparent);
-  box-shadow: var(--app-shadow-soft);
+  gap: 16px;
 }
 
 .profile-section {
   position: relative;
   margin: 0;
-  padding: 20px;
-  overflow: hidden;
+  padding: 18px;
 }
 
-.profile-section::after {
-  position: absolute;
-  top: -48px;
-  right: -50px;
-  width: 120px;
-  height: 120px;
-  pointer-events: none;
-  content: "";
-  border-radius: 999px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--app-accent) 8%, transparent), transparent 70%);
+.profile-section--wide {
+  grid-column: 1 / -1;
 }
 
 .section-heading {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
-  margin-bottom: 17px;
-}
-
-.section-sigil {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, transparent);
-  border-radius: 9px;
-  background: var(--app-accent-soft);
-  color: var(--app-accent);
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: 0.02em;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
 }
 
 .section-title {
-  color: var(--app-text);
-  font-size: 14px;
-  font-weight: 750;
-  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: -0.005em;
 }
 
 /* Side panel -------------------------------------------------------------- */
 .panel-shell {
-  position: relative;
   min-height: 100vh;
-  overflow: hidden;
-  padding: 18px 16px 28px;
-  background:
-    radial-gradient(circle at 115% -5%, rgba(120, 100, 255, 0.22), transparent 18rem),
-    radial-gradient(circle at -15% 85%, rgba(43, 201, 170, 0.1), transparent 20rem),
-    var(--app-bg);
-  color: var(--app-text);
+  padding: 14px 14px 28px;
+  background: var(--ground);
+  color: var(--ink);
 }
 
 .panel-header {
@@ -340,173 +363,212 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
 }
 
 .panel-product-name {
+  margin: 0;
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 620;
   letter-spacing: -0.015em;
-}
-
-.panel-host {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-  color: var(--app-muted);
-  font-size: 10px;
-}
-
-.panel-host::before {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  content: "";
-  border-radius: 999px;
-  background: var(--app-teal);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-teal) 12%, transparent);
 }
 
 .panel-icon-button {
   display: inline-grid;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--app-border);
-  border-radius: 11px;
-  background: var(--app-bg-raised);
-  color: var(--app-muted);
-  transition: 150ms ease;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink-2);
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 .panel-icon-button:hover {
-  border-color: var(--app-border-strong);
-  color: var(--app-text);
-  transform: translateY(-1px);
-}
-
-.panel-hero {
-  position: relative;
-  padding: 24px 20px 20px;
-  overflow: hidden;
-  border: 1px solid var(--app-border);
-  border-radius: 22px;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--app-panel) 96%, transparent), color-mix(in srgb, var(--app-accent-soft) 55%, var(--app-panel)));
-  box-shadow: var(--app-shadow);
-}
-
-.panel-hero::after {
-  position: absolute;
-  top: -36px;
-  right: -36px;
-  width: 120px;
-  height: 120px;
-  pointer-events: none;
-  content: "";
-  border: 1px solid color-mix(in srgb, var(--app-accent) 15%, transparent);
-  border-radius: 999px;
-  box-shadow:
-    0 0 0 18px color-mix(in srgb, var(--app-accent) 4%, transparent),
-    0 0 0 38px color-mix(in srgb, var(--app-accent) 3%, transparent);
-}
-
-.panel-hero-icon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  margin-bottom: 34px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--app-accent) 22%, transparent);
-  border-radius: 14px;
-  background: var(--app-accent-soft);
-  color: var(--app-accent);
+  border-color: var(--rule-2);
+  color: var(--ink);
 }
 
 .panel-card {
-  border: 1px solid var(--app-border);
-  border-radius: 17px;
-  background: color-mix(in srgb, var(--app-panel) 94%, transparent);
-  box-shadow: var(--app-shadow-soft);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--lift-soft);
 }
 
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
+/* ---------------------------------------------------------------------------
+   THE CERTAINTY LEDGER - the signature of this interface.
 
-.metric-card {
-  padding: 12px;
-  border: 1px solid var(--app-border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--app-panel) 90%, transparent);
-}
+   One bar, segmented in proportion to what the scan actually found. It
+   replaced a grid of four to six equal metric cards, which gave "fields
+   detected" - a number nobody acts on - the same weight as "needs your
+   review", the only number that is a to-do list. Worse, the grid grew from
+   four cards to six after a fill and shifted everything below it.
 
-.metric-value {
-  display: block;
-  margin-top: 5px;
-  color: var(--app-text);
-  font-size: 22px;
-  font-weight: 760;
-  letter-spacing: -0.04em;
-  line-height: 1;
-}
-
-.metric-label {
-  color: var(--app-muted);
-  font-size: 10px;
-  line-height: 1.25;
-}
-
-.action-card {
-  border: 1px solid var(--app-border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--app-panel-soft) 92%, transparent);
-}
-
-.soft-divider {
-  height: 1px;
-  background: linear-gradient(to right, transparent, var(--app-border-strong), transparent);
-}
-
-.scan-orbit {
-  position: relative;
-  display: grid;
-  width: 72px;
-  height: 72px;
-  margin: 22px auto;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--app-accent) 20%, transparent);
+   A single proportional bar cannot flatter the result. If the extension
+   understood four fields out of nineteen, the grey runs three quarters of the
+   width and you see that before you read a word. A product whose promise is
+   "it will admit what it does not know" should show ignorance at full size.
+   --------------------------------------------------------------------------- */
+.ledger {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
   border-radius: 999px;
 }
 
-.scan-orbit::before {
+.ledger-seg {
+  min-width: 3px;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: ledger-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ledger-seg--verified { background: var(--s-verified); }
+.ledger-seg--confident { background: var(--s-confident); }
+.ledger-seg--review { background: var(--s-review); }
+.ledger-seg--unknown { background: var(--s-unknown); opacity: 0.34; }
+
+@keyframes ledger-in {
+  from { transform: scaleX(0); }
+}
+
+.ledger-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 12px;
+}
+
+.ledger-key-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.ledger-key-dot {
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.ledger-count {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Field rows -------------------------------------------------------------- */
+
+/* The state rail. Reading down the list, the left edge is a stripe whose
+   colour composition IS the trust profile of the application - the same
+   information as the ledger, at the point where you act on it. */
+.field-row {
+  position: relative;
+  padding: 11px 12px 11px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field-row:last-child {
+  border-bottom: 0;
+}
+
+.field-row::before {
   position: absolute;
-  inset: 7px;
+  top: 11px;
+  bottom: 11px;
+  left: 10px;
+  width: 2px;
   content: "";
-  border: 2px solid transparent;
-  border-top-color: var(--app-accent);
-  border-right-color: color-mix(in srgb, var(--app-teal) 72%, transparent);
-  border-radius: inherit;
-  animation: orbit 1.2s linear infinite;
+  border-radius: 999px;
+  background: var(--rail, var(--s-unknown));
 }
 
-.scan-orbit::after {
-  width: 18px;
-  height: 22px;
-  content: "";
-  border: 1.5px solid var(--app-muted);
-  border-radius: 4px;
+.field-row--verified { --rail: var(--s-verified); }
+.field-row--high_confidence { --rail: var(--s-confident); }
+.field-row--needs_review { --rail: var(--s-review); }
+.field-row--missing { --rail: var(--s-unknown-line); }
+
+/* The value that will be typed into the application. It is the thing you are
+   here to check, so it is the largest, darkest thing in the row - the label
+   above it is the caption. Previously this was 10px muted monospace beneath a
+   bold label, i.e. the interface shouted the question and whispered the
+   answer. */
+.field-value {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@keyframes orbit {
-  to {
-    transform: rotate(360deg);
-  }
+.field-label {
+  display: block;
+  color: var(--ink-2);
+  font-size: 11px;
+  letter-spacing: 0.005em;
+}
+
+.field-provenance {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+/* Reading indicator: a rule that sweeps down a stack of lines, which is what
+   scanning a form actually is. One animation, one place. */
+.scan-lines {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  width: 120px;
+  margin: 4px auto 18px;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.scan-lines span {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--rule-2);
+}
+
+.scan-lines span:nth-child(2) { width: 74%; }
+.scan-lines span:nth-child(3) { width: 88%; }
+.scan-lines span:nth-child(4) { width: 58%; }
+
+.scan-lines::after {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  content: "";
+  background: var(--ink);
+  animation: scan-sweep 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes scan-sweep {
+  0% { top: 0; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -518,6 +580,13 @@ select {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* The sweep is the only thing telling the user a scan is still running, so
+     it needs a still equivalent rather than simply being stopped. */
+  .scan-lines::after {
+    top: 50%;
+    opacity: 1;
+  }
 }
 
 @media (max-width: 900px) {
@@ -528,21 +597,17 @@ select {
   .options-sidebar {
     position: relative;
     height: auto;
-    padding: 18px;
+    padding: 16px;
     border-right: 0;
-    border-bottom: 1px solid var(--app-border);
+    border-bottom: 1px solid var(--rule);
   }
 
   .options-main {
-    padding: 28px 18px 60px;
+    padding: 24px 16px 60px;
   }
 
   .profile-grid {
     grid-template-columns: 1fr;
-  }
-
-  .profile-grid > section {
-    grid-column: auto !important;
   }
 
   .workspace-topbar {
@@ -551,6 +616,6 @@ select {
 
   .workspace-actions {
     justify-content: flex-start;
-    margin-top: 18px;
+    margin-top: 16px;
   }
 }
