@@ -374,3 +374,79 @@ export function mergeGain<T extends { id: string }>(existing: T, incoming: T): n
   }
   return gained;
 }
+
+// ---------------------------------------------------------------------------
+// Applying the user's decisions
+// ---------------------------------------------------------------------------
+
+/**
+ * What the user chose to do with one parsed entry.
+ *
+ * `skip` is the default for a detected duplicate and `add` for everything
+ * else, but both are only ever defaults - the review screen shows all three
+ * and nothing is applied without a click.
+ */
+export type EntryDecision = 'skip' | 'add' | 'update';
+
+export interface EntryDecisionInput<T> {
+  /**
+   * The entry to apply - which is the user's EDITED copy when they corrected
+   * something on the review screen, not necessarily what the parser produced.
+   */
+  entry: T;
+  decision: EntryDecision;
+  /** Index in `existing` that `update` should merge into. From `findDuplicate`. */
+  matchIndex?: number;
+}
+
+export interface ApplyResult<T> {
+  entries: T[];
+  added: number;
+  updated: number;
+  skipped: number;
+}
+
+/**
+ * Fold a screen's worth of decisions into a new list.
+ *
+ * Pure, and separated from the review UI on purpose: "what does accepting this
+ * screen do to my profile" is a question about data, and answering it in a
+ * component would make it answerable only by rendering one.
+ *
+ * An `update` whose match index no longer exists is APPENDED rather than
+ * dropped. The profile could have changed between the parse and the click, and
+ * of the two failure modes - a duplicate the user can delete, or a silently
+ * discarded entry they asked to keep - only the first is recoverable.
+ */
+export function applyEntryDecisions<T extends { id: string }>(
+  existing: readonly T[],
+  decisions: readonly EntryDecisionInput<T>[],
+): ApplyResult<T> {
+  const entries = [...existing];
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const { entry, decision, matchIndex } of decisions) {
+    if (decision === 'skip') {
+      skipped += 1;
+      continue;
+    }
+
+    const index = decision === 'update' ? matchIndex : undefined;
+    const target = index === undefined ? undefined : entries[index];
+
+    if (index === undefined || target === undefined) {
+      entries.push(entry);
+      added += 1;
+      continue;
+    }
+
+    // Merge onto the ACCUMULATING list, so two parsed entries pointing at the
+    // same existing one compose instead of the second undoing the first.
+    entries[index] = mergeEntry(target, entry);
+    updated += 1;
+  }
+
+  return { entries, added, updated, skipped };
+}

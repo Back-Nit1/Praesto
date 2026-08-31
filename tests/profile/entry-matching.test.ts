@@ -10,7 +10,7 @@
  *      `mergeCandidates` makes for scalar fields, extended to list entries.
  */
 import { describe, expect, it } from 'vitest';
-import { findDuplicate, mergeEntry } from '@profile/entry-matching';
+import { applyEntryDecisions, findDuplicate, mergeEntry } from '@profile/entry-matching';
 import {
   emptyValue,
   resumeValue,
@@ -287,5 +287,86 @@ describe('mergeEntry', () => {
       project({ url: rv('https://parsed.example', 0.9) }),
     );
     expect(mergedProject.url.value).toBe('https://kept.example');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyEntryDecisions
+// ---------------------------------------------------------------------------
+
+describe('applyEntryDecisions', () => {
+  it('appends the entries marked add, in order', () => {
+    const a = job({ id: 'a', company: rv('Globex') });
+    const b = job({ id: 'b', company: rv('Initech') });
+    const result = applyEntryDecisions([], [
+      { entry: a, decision: 'add' },
+      { entry: b, decision: 'add' },
+    ]);
+
+    expect(result.entries.map((entry) => entry.id)).toEqual(['a', 'b']);
+    expect(result.added).toBe(2);
+  });
+
+  it('drops the entries marked skip without touching the rest', () => {
+    const existing = [job({ id: 'held' })];
+    const result = applyEntryDecisions(existing, [
+      { entry: job({ id: 'new' }), decision: 'skip', matchIndex: 0 },
+    ]);
+
+    expect(result.entries.map((entry) => entry.id)).toEqual(['held']);
+    expect(result.skipped).toBe(1);
+    expect(result.added).toBe(0);
+  });
+
+  it('merges an update into the matched entry rather than appending it', () => {
+    const existing = [job({ id: 'held', location: emptyValue<string>() })];
+    const result = applyEntryDecisions(existing, [
+      { entry: job({ id: 'parsed', location: rv('Remote') }), decision: 'update', matchIndex: 0 },
+    ]);
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.id).toBe('held');
+    expect(result.entries[0]?.location.value).toBe('Remote');
+    expect(result.updated).toBe(1);
+  });
+
+  it('updates the matched entry, not the first one', () => {
+    const existing = [
+      job({ id: 'other', company: rv('Globex') }),
+      job({ id: 'held', location: emptyValue<string>() }),
+    ];
+    const result = applyEntryDecisions(existing, [
+      { entry: job({ id: 'parsed', location: rv('Remote') }), decision: 'update', matchIndex: 1 },
+    ]);
+
+    expect(result.entries[0]?.location.value).toBeNull();
+    expect(result.entries[1]?.location.value).toBe('Remote');
+  });
+
+  it('appends rather than losing an update whose match index is gone', () => {
+    // Defensive: the profile could have changed between the parse and the
+    // click. Appending shows the user a duplicate they can delete; dropping
+    // the entry silently loses data they asked to keep.
+    const result = applyEntryDecisions([job({ id: 'held' })], [
+      { entry: job({ id: 'parsed' }), decision: 'update', matchIndex: 7 },
+    ]);
+
+    expect(result.entries.map((entry) => entry.id)).toEqual(['held', 'parsed']);
+    expect(result.added).toBe(1);
+    expect(result.updated).toBe(0);
+  });
+
+  it('leaves the existing array untouched', () => {
+    const existing = [job({ id: 'held', location: emptyValue<string>() })];
+    applyEntryDecisions(existing, [
+      { entry: job({ id: 'parsed', location: rv('Remote') }), decision: 'update', matchIndex: 0 },
+    ]);
+    expect(existing[0]?.location.value).toBeNull();
+  });
+
+  it('reports nothing happening when every entry was skipped', () => {
+    const result = applyEntryDecisions([], [{ entry: job(), decision: 'skip' }]);
+    expect(result).toMatchObject({ added: 0, updated: 0, skipped: 1 });
+    expect(result.entries).toEqual([]);
   });
 });
