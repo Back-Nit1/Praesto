@@ -2,8 +2,8 @@
 
 Required by `prompt.md` section 0.13. Updated as work lands.
 
-**Last updated:** 2026-08-30
-**Tests:** 263 passing · **Typecheck:** clean · **Build:** 976 kB (`dist/chrome-mv3`)
+**Last updated:** 2026-08-31
+**Tests:** 525 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -15,7 +15,7 @@ Required by `prompt.md` section 0.13. Updated as work lands.
 | 1 — Canonical applicant profile | **Done** |
 | 2 — Resume parsing onboarding | **Done** |
 | 3 — Generic semantic form engine | **Done**, including the mapping playground |
-| 4 — Generic fill engine | **Mostly done** — adapters, verification, side-panel review and correction all work; audit persistence outstanding |
+| 4 — Generic fill engine | **Done** — adapters, verification, side-panel review and correction, audit persistence and history |
 | 5 — Learned corrections | **Done** |
 | 6 — Greenhouse + Lever | Detector done; no ATS-specific adapters yet (none needed so far) |
 | 7 — Workday | Not started |
@@ -101,8 +101,55 @@ header of `src/packages/form-engine/mapper/mapper.ts`.
 - [x] High/medium/low confidence behaviour
 - [x] Debounced `MutationObserver`
 - [x] User correction UI — every row in the audit list has a **Change** control
-- [ ] Audit records persisted to IndexedDB — the store and schema exist;
-      `REPORT_FILL_RESULTS` feeds the learning counters but is not archived
+- [x] Audit records persisted to IndexedDB
+- [x] Durable application history, with recovery of the current scan
+
+---
+
+## Application history and recovery
+
+Two different problems, deliberately solved with two different lifetimes.
+
+**Recovery — `chrome.storage.session`, per tab.** The side panel's scan lived in
+React state and nowhere else, so closing the panel destroyed the record of which
+fields had failed. A user who filled eighteen questions, closed the panel to
+read the job description and came back had to re-read the whole form to find the
+two that had not landed — the exact work this product exists to remove. The
+panel now restores its last scan for the same tab *and* the same address, and
+says on screen that what it is showing is a record rather than a live reading.
+
+**History — IndexedDB, 200 runs / 2000 rows / 90 days.** One `FillAuditRecord`
+per scanned field (spec section 24), grouped into runs for the options page's
+*History* tab.
+
+**How a fill result finds the scan that produced it.** Spec section 24 wants the
+detected label, the mapping confidence and the cascade stage in every record.
+Only the worker knows those, for the few milliseconds inside `resolveFields` —
+and the fill report arrives in a later message, by which time MV3 has often
+evicted and restarted the worker. So the scan's metadata is stashed in session
+storage at resolve time and joined at report time (`src/packages/audit/`). The
+join key is tab + canonical URL, for the reason the side panel already
+documents: every posting on a careers site shares a hostname.
+
+**Rows are written for every scanned field, not only the filled ones.** A
+history that lists thirteen successes and says nothing about the five questions
+we did not understand flatters us; the five are what the user typed by hand and
+what a correction would fix.
+
+**The applicant's answer is never recorded.** `FillAuditRecord` has no field
+that could hold one, and `tests/audit/join.test.ts` asserts the key set from
+outside the type system. The one exception in this feature is the panel's
+session snapshot, which does hold resolved values so a suggestion can be filled
+after a restore without rescanning — session-area, never on disk, gone when the
+browser closes. Written up in `Security.md` §9.
+
+**Retention cuts on a run boundary and never removes the newest run.** Half an
+application in the history is worse than none of it, and a ceiling that hid the
+fill you just performed would read as the feature being broken.
+
+**History never fails a fill.** Every write on that path is logged and
+swallowed. Reporting a fill that worked as failed because a history write failed
+would be a lie in the one direction this product must not tell one.
 
 ---
 
@@ -174,6 +221,16 @@ what it knows.
    response to an answer must not be answered without the user seeing it - but
    it does mean an extra click on a conditional form.
 7. **English-only aliases.**
+8. **A history row whose scan has expired says less.** If the stash is gone —
+   more than 30 minutes between scanning and filling, or a browser restart in
+   between — the row is still written, but with no label, no confidence and
+   `mappingSource: 'none'`, because that is what is honestly known by then. It
+   also carries `ats: 'unknown'`, since the scanner's fill report hardcodes that
+   in its page context; fixing it is a change to the content script's message.
+9. **The scan-to-history join has no end-to-end test.** Every piece of it is
+   tested in isolation — the join, retention, the repository, the stash — but
+   the worker itself has no test harness in this repo, so the wiring between
+   them is verified by hand. That is the largest untested seam in this feature.
 8. **The end-to-end tests run against our own fixtures.** They use a real
    browser, the real build and the real message pipeline, so they catch a
    rejected manifest, an unregistered worker or a fill that never lands - but
@@ -295,7 +352,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 206 tests
+npm test           # 525 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```
