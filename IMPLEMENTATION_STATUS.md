@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-08-31
-**Tests:** 525 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
+**Tests:** 641 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -17,9 +17,9 @@ Required by `prompt.md` section 0.13. Updated as work lands.
 | 3 — Generic semantic form engine | **Done**, including the mapping playground |
 | 4 — Generic fill engine | **Done** — adapters, verification, side-panel review and correction, audit persistence and history |
 | 5 — Learned corrections | **Done** |
-| 6 — Greenhouse + Lever | Detector done; no ATS-specific adapters yet (none needed so far) |
+| 6 — Greenhouse + Lever | Detector done; semantic fallback done; no ATS-specific adapters yet (none needed so far). **Not yet run against a real application** |
 | 7 — Workday | Not started |
-| 8 — Question / answer memory | Not started |
+| 8 — Question / answer memory | **Partly done** — the repeated-question cache exists and works; approving and editing free-text answers does not |
 
 Resume parsing was built last, on the spec's own sequencing instruction
 (section 30): *"do not let it block testing the core application engine."* The
@@ -187,6 +187,68 @@ would keep filling the field the user just told it to stop touching.
 
 ---
 
+## Phase 6 / 8 — Semantic fallback for refused fields
+
+The deterministic pipeline leaves a field blank whenever the mapper cannot name
+the question or the resolver cannot match our answer to an offered option. That
+is still the default and still the behaviour when anything goes wrong. This adds
+one stage that runs **only on those refusals**, and feeds its results back
+through the **existing** `decideFill`, so the sensitive-field gate applies to a
+model-derived mapping exactly as it applies to an alias match.
+
+- [x] Refusal queue (`@semantic/queue`) — pure, synchronous, no I/O
+- [x] Persistent concept cache, so a distinct question costs at most one call ever
+- [x] Deterministic option scorer, which settles most option failures for free
+- [x] Stage 1: batched question → `ProfilePath`, no profile data sent
+- [x] Stage 2: one value + one option list, only when the scorer cannot decide
+- [x] Wire schemas, Zod-validated, page text carried as `untrusted`
+- [x] `connect-src` pinned to the compiled-in backend origin
+- [ ] **Run against a real Greenhouse, Lever or Ashby application**
+
+**The order is the design**, and each step is cheaper than the next:
+
+    cache    free, private, instant. The second application makes zero calls.
+    scorer   free, deterministic. 10 of 13 corpus cases die here.
+    model    last. Two stages, minimal data, and its answer is a SUGGESTION.
+
+**A semantic mapping can never autofill.** `sourceScores.semantic` (0.80) sits
+below `autofillThreshold` (0.95), so a novel question surfaces as something the
+user reads. It is promoted the way every mapping is promoted: the user accepts
+it, the existing correction path writes a `LearnedMapping`, and the *next*
+encounter matches at 0.96 with the user's own authority behind it. There is no
+path by which the number rises on its own.
+
+**Worth knowing, because it is not the obvious answer:** on this route the
+confidence cap — not `requiresVerifiedValue` — is what keeps a work
+authorization question from autofilling. The sensitive-path gate deliberately
+permits a value the user typed themselves, which is the whole point of storing
+one. A mutation check confirmed this: raising `sourceScores.semantic` to 0.99
+turns all four sensitive-field tests into autofills.
+`tests/semantic/safety.test.ts` says so in as many words.
+
+**Two narrowings stand between a model reply and a filled field**, and both are
+tested by feeding in answers that fail them:
+
+1. a returned path must be one *we* defined (`isProfilePath`). A model naming
+   `contact.bloodType` is refused, and the refusal is cached so it is not
+   re-asked;
+2. a returned option must be one the *form* offers, matched in our code against
+   the real list. Never chosen by index — an off-by-one index names a real,
+   valid, wrong option that nothing downstream could detect.
+
+**The cache is a second store, not an extension of `LearnedMappingStore`.** A
+learned mapping carries the user's authority and scores at 0.96; a model's guess
+must not inherit that by being stored where the mapper reads. It would also
+compete for that store's 1000-rule cap and start evicting real user corrections.
+`semantic/cache.ts` records the full argument.
+
+**A null answer is cached like any other.** "No path fits this question" is the
+correct answer to "How did you hear about us?", and to most of the questions a
+user actually meets. Not remembering it would mean paying for it on every
+application forever.
+
+---
+
 ## Current limitations
 
 Stated plainly, because the product's whole claim is that it does not overstate
@@ -237,7 +299,39 @@ what it knows.
    the pages are ours. An anonymised capture of a real Greenhouse, Lever, Ashby
    and Workday application is the next thing worth adding, and every real-world
    failure should become a saved fixture and a failing test before it is fixed.
-9. **The end-to-end suite grants host permission statically.** `activeTab` is
+9. **The semantic fallback has never run against a real application, or a real
+   backend.** The fixtures in `fixtures/forms/*-semantic.html` are written from
+   each ATS's published naming conventions, not captured from real forms, and
+   every test runs against a fake port. So the subsystem is proven against the
+   *shape* of Greenhouse, Lever and Ashby markup and against its own contracts.
+   It is not proven against Greenhouse. The backend endpoints
+   (`/v1/semantic/concepts`, `/v1/semantic/option`) do not exist yet.
+
+10. **The option scorer is deliberately weak in the middle.** It settles exact
+   matches, case and punctuation differences, reordered labels
+   ("Computer Engineering" / "Engineering, Computer") and guarded containment.
+   It has NO general similarity tier, because any Jaccard or edit-distance
+   threshold that admits the good cases also admits "Virginia" against "West
+   Virginia" — and the failure that produces is not a blank field but a
+   confident wrong one. The cost is real and is paid in model calls: a
+   single-token value against a longer option ("Rutgers" against "Rutgers
+   University - Newark") always escalates, and so does every numeric value
+   against a range dropdown. On the 13-case corpus in
+   `tests/semantic/option-match.test.ts`, 10 are settled locally.
+
+11. **Cache eviction is oldest-first, not least-recently-used.** LRU needs a
+   write on every read, and the cache is read on the hot path of every scan —
+   which would turn the free cache hit into a storage write and defeat its
+   purpose. At the 500-entry cap the difference is theoretical, but a user who
+   met 500 novel questions would start paying again for their oldest ones.
+
+12. **A cached concept is never re-examined.** If a model's answer for a
+   question was wrong, the user corrects the field once and the existing
+   learned-mapping path takes over at higher confidence — but the wrong cached
+   concept stays until the cache is cleared. There is a `clear()`, and no UI
+   calls it yet.
+
+13. **The end-to-end suite grants host permission statically.** `activeTab` is
    granted by a click on the toolbar icon, which is browser chrome and cannot
    be automated, so the test copy of the build is given host access to the
    fixture server. The permission FLOW - a lapsed grant, a per-origin request -
@@ -266,26 +360,45 @@ each would have been near-invisible in production:
 
 ## Next recommended task
 
-**Test against real Greenhouse and Lever applications.** Every layer the spec
-asks for now exists, is covered by unit tests, and is exercised end-to-end in a
-real Chromium (`npm run test:e2e` - the built extension, its service worker,
-`chrome.scripting` injection and a live DOM). But those fixtures are still
-markup *we* wrote. They encode what we believe real forms look like; only a
-real form can tell us where that belief is wrong.
+**Test against real Greenhouse, Lever and Ashby applications.** This was the
+next task before the semantic fallback landed and it is still the next task —
+more so now, because there is a second layer whose fixtures are also markup
+*we* wrote. They encode what we believe real forms look like; only a real form
+can tell us where that belief is wrong.
 
-The method matters more than the finding: each failure becomes a fixture and a
-failing test before anything is changed, and the fix goes into the generic
-engine unless it genuinely cannot (spec section 18). Expect most gaps to be
-missing aliases — cheap, precise fixes — rather than anything structural.
+The method matters more than the finding: capture each real form as an
+anonymised fixture **before** fixing anything against it, then a failing test,
+then a fix in the generic engine unless it genuinely cannot go there (spec
+section 18). Expect most gaps to be missing aliases — cheap, precise fixes —
+rather than anything structural.
+
+Two questions the fixtures cannot answer and a real form can:
+
+- **How many refusals does the deterministic scorer actually settle?** The
+  10-of-13 figure is measured against a corpus we invented. If the real number
+  is much lower, the answer is a better scorer, not a bigger quota — every case
+  it settles is free, private and instant.
+- **Which questions does stage 1 get wrong?** A wrong concept is not a wrong
+  fill (it arrives as a suggestion), but it is noise in the review list, and
+  noise trains the user to click through without reading — which would destroy
+  the value of the review step this whole product is built around.
 
 After that, in order:
-1. **Persist audit records to IndexedDB.** They are the input to every metric in
-   spec section 26, and without them "incorrect-fill rate" — the metric the
-   spec calls most important — cannot be measured at all.
-2. **Incremental rescan of a revealed subtree**, so a conditional question
-   appears in the panel without a full rescan of the page. The signal is
-   already wired; only the incremental path is missing.
-3. **ATS-specific rules for Greenhouse, Lever and Workday**, added only where
+1. **Stand up the two backend endpoints.** `/v1/semantic/concepts` and
+   `/v1/semantic/option` are specified by the schemas in `backend/schemas.ts`
+   and do not exist. Until they do, the fallback degrades to today's behaviour
+   on every field — which is correct, and is not the feature.
+2. **Surface remaining quota in the panel.** `gateway.usage()` exists and
+   `RATE_LIMITED` carries `retryAfterMs`; the panel does not yet say "you have
+   158 AI answers left today", so a user who runs out sees fields silently stop
+   improving.
+3. **Let the user see and clear the concept cache.** `SemanticConceptCache` has
+   `clear()` and the settings screen does not call it, so a wrong cached
+   concept currently has no escape short of clearing all extension data.
+4. **Incremental rescan of a revealed subtree**, so a conditional question
+   appears in the panel without a full rescan. The signal is wired; only the
+   incremental path is missing.
+5. **ATS-specific rules for Greenhouse, Lever and Workday**, added only where
    the generic engine genuinely cannot reach (spec section 18).
 
 ---
@@ -352,7 +465,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 525 tests
+npm test           # 641 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```
