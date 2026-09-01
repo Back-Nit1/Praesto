@@ -93,6 +93,19 @@ export const STORAGE_KEYS = {
   toolbarScanPrefix: `${PREFIX}:session:toolbarScan`,
 
   /**
+   * What the last few scans cost in model calls.
+   *
+   * Local rather than session, because the question it answers - "how much of
+   * today's budget did that form use" - is asked about the same window the
+   * daily quota counts, and that window outlives a browser session.
+   *
+   * COUNTS AND TIMES ONLY. No hostname, no field, no question text: history
+   * already records which forms were filled, and duplicating any of it here
+   * would put the same disclosure in two places with one of them undocumented.
+   */
+  modelUsageLog: `${PREFIX}:backend:modelUsageLog`,
+
+  /**
    * Questions the semantic fallback has already resolved, so each distinct one
    * costs at most one model call ever.
    *

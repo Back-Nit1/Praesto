@@ -58,6 +58,7 @@ import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
 import { BackendGateway } from '@backend/gateway';
+import { ScanCostLog } from '@backend/usage-log';
 import { createSemanticPort } from '@backend/semantic';
 import {
   applySemanticFallback,
@@ -134,6 +135,7 @@ export default defineBackground(() => {
    * improving has no way to tell that from the feature simply not helping.
    */
   const semanticGateway = new BackendGateway(store);
+  const scanCosts = new ScanCostLog(store);
   const semanticPort = createSemanticPort(semanticGateway);
 
   /**
@@ -547,6 +549,15 @@ export default defineBackground(() => {
       semantic.modelCalls === 0 && semantic.error === undefined && semantic.updates.length === 0
         ? undefined
         : summariseRun(semantic, semantic.error !== undefined ? await readUsage() : undefined);
+
+    // What this scan cost, for the settings screen's readout. Recorded rather
+    // than shown in the panel, for the reason the panel already documents: it
+    // stays quiet unless something needs the user. A failure here is logged and
+    // dropped - a usage row must never cost a scan.
+    if (semantic.modelCalls > 0) {
+      const logged = await scanCosts.record({ at: Date.now(), modelCalls: semantic.modelCalls });
+      if (!logged.ok) log.debugLazy(() => ['Could not record scan cost', logged.error.code]);
+    }
 
     await stashScan(request, senderTabId, auditFields);
 

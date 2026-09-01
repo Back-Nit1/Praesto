@@ -125,6 +125,9 @@ export class BackendGateway {
     return this.daily.peek();
   }
 
+  /** The daily cap, for a UI that needs to state it before any call is made. */
+  static readonly dailyLimit = DAILY_CALL_LIMIT;
+
   /**
    * POST a JSON body to `path` and validate the reply.
    *
@@ -316,4 +319,21 @@ async function readBounded(
   } catch (error) {
     return err(new AppError('BACKEND_UNREACHABLE', 'The response ended early', { cause: error }));
   }
+}
+
+/**
+ * The daily budget, read without constructing a gateway.
+ *
+ * The options page wants to state today's spend and has no business holding
+ * something that can make a network request to do it. Reading the same window
+ * the gateway writes keeps one source of truth for the number.
+ */
+export async function readModelUsage(
+  store: KeyValueStore,
+): Promise<{ used: number; limit: number; resetsInMs: number }> {
+  return new PersistentQuota(store, {
+    storageKey: STORAGE_KEYS.modelQuota,
+    limit: DAILY_CALL_LIMIT,
+    windowMs: DAILY_WINDOW_MS,
+  }).peek();
 }
