@@ -22,6 +22,8 @@ export interface FillResultInput {
   localId: string;
   attempted: boolean;
   verified: boolean;
+  /** The user accepted a suggestion. Absent means unknown, never "accepted". */
+  userInitiated?: boolean;
   adapter?: string;
   /** A failure CODE from the fill engine. */
   failureReason?: string;
@@ -78,9 +80,18 @@ export function buildAuditRecords(
       // failure.
       fillAttempted: reported?.attempted ?? false,
       fillVerified: reported?.verified ?? false,
-      // No verdict yet, and `unreviewed` does not mean "correct" - nothing at
-      // fill time can know whether this was right. Only the user can say.
-      outcome: 'unreviewed' as const,
+      // The one verdict a fill report can carry. A person read this suggestion
+      // and accepted it, which is the only positive evidence the audit trail
+      // ever gets - everything else here is a failure or a silence.
+      //
+      // Only on a row the POLICY had refused to write on its own. A verified
+      // fill we decided on ourselves tells us nothing about whether it was
+      // right: nobody looked. Absent flag, or a `fill` row, stays `unreviewed`,
+      // which does not mean "correct".
+      outcome:
+        reported?.userInitiated === true && field.decidedAction === 'suggest'
+          ? ('accepted_suggestion' as const)
+          : ('unreviewed' as const),
       ...(reported?.adapter !== undefined ? { adapter: reported.adapter } : {}),
       ...(reported?.failureReason !== undefined ? { failureReason: reported.failureReason } : {}),
     } satisfies FillAuditRecord;

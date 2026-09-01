@@ -183,6 +183,19 @@ export const reportFillResultsRequestSchema = z.object({
         profilePath: z.string().max(128).nullable(),
         attempted: z.boolean(),
         verified: z.boolean(),
+        /**
+         * The user pressed accept on a suggestion, rather than this being a
+         * fill we decided on ourselves.
+         *
+         * The ONLY positive evidence in the system. Everything else the audit
+         * trail records is either a failure or a silence, and silence is not
+         * evidence of correctness - see audit/metrics.ts.
+         *
+         * Optional so a content script still running in a tab from before this
+         * shipped keeps working. Absent means "we do not know", which is
+         * `unreviewed`. It must never be read as "accepted".
+         */
+        userInitiated: z.boolean().optional(),
         adapter: z.string().max(64).optional(),
         // A CODE, never the value that failed to fill - that value is applicant
         // PII and has no business in a log.
@@ -294,6 +307,15 @@ export const resolvedFieldActionSchema = z.object({
    */
   controlKind: controlKindSchema.optional(),
   profilePath: z.string().nullable(),
+  /**
+   * This action exists because a person read a suggestion and accepted it.
+   *
+   * Set by the side panel at the point of the click, never by the worker - the
+   * worker cannot know what a human did. Carried through the page so the fill
+   * report can say which fills were authorised one by one, which is the only
+   * positive signal the audit trail gets.
+   */
+  userInitiated: z.boolean().optional(),
   mappingConfidence: z.number().min(0).max(1),
   knowledgeState: z.enum(['known', 'derived', 'previously_seen', 'probable', 'unknown']),
   /** Short human-readable explanation for the side panel's audit list. */

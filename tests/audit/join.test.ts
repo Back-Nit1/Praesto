@@ -51,6 +51,46 @@ describe('buildAuditRecords', () => {
     expect(rows[1]).toMatchObject({ fillAttempted: false, fillVerified: false, mappingSource: 'none' });
   });
 
+  it('records an accepted suggestion as the only positive evidence there is', () => {
+    const run = pending({
+      fields: [
+        {
+          localId: 'hub',
+          fieldFingerprint: 'fp-hub',
+          detectedLabel: 'preferred hub',
+          mappedProfilePath: 'preferences.locations',
+          mappingConfidence: 0.6,
+          mappingSource: 'fuzzy',
+          decidedAction: 'suggest',
+        },
+      ],
+    });
+
+    const rows = buildAuditRecords(run, [result({ localId: 'hub', userInitiated: true })], NOW);
+
+    expect(rows[0]?.outcome).toBe('accepted_suggestion');
+  });
+
+  it('does not read a verified fill nobody looked at as evidence it was right', () => {
+    // A `fill` the policy decided on its own, verified by the page. Nothing
+    // here says the MAPPING was correct - only that the control took a value.
+    const rows = buildAuditRecords(pending(), [result({ localId: 'email' })], NOW);
+
+    expect(rows[0]?.outcome).toBe('unreviewed');
+  });
+
+  it('ignores a userInitiated flag on a field the policy filled by itself', () => {
+    // The flag says a person pressed a button. On a row we would have written
+    // anyway it says nothing about the mapping, so it earns no verdict.
+    const rows = buildAuditRecords(
+      pending(),
+      [result({ localId: 'email', userInitiated: true })],
+      NOW,
+    );
+
+    expect(rows[0]?.outcome).toBe('unreviewed');
+  });
+
   it('gives every row of a run the same timestamp, so retention can cut on a run boundary', () => {
     const rows = buildAuditRecords(pending(), [], NOW);
 

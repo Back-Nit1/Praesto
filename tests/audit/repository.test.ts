@@ -132,6 +132,21 @@ describe('AuditRepository', () => {
     expect(field).not.toHaveProperty('userCorrected');
   });
 
+  it('does not let a later fill report erase a correction the user already made', async () => {
+    const repo = new AuditRepository(new InMemoryAuditCollection());
+
+    // The panel fills the safe fields.
+    await repo.record([row({ id: 'r1:a', runId: 'r1', fieldFingerprint: 'fp-x' })]);
+    // The user corrects one of them.
+    await repo.recordOutcome('fp-x', null);
+    // The user then accepts a suggestion elsewhere, and the page reports the
+    // whole scan again - including the row they just corrected.
+    await repo.record([row({ id: 'r1:a', runId: 'r1', fieldFingerprint: 'fp-x' })]);
+
+    const runs = await repo.recentRuns();
+    expect(runs.ok && runs.value[0]?.fields[0]?.outcome).toBe('rejected_to_none');
+  });
+
   it('prunes to the retention policy and reports the number dropped', async () => {
     const repo = new AuditRepository(new InMemoryAuditCollection(), {
       maxRuns: 1,

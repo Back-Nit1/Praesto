@@ -62,6 +62,16 @@ export interface AuditCollection {
  */
 export const HISTORY_READ_LIMIT = 4000;
 
+/**
+ * How far back a correction, or a write preserving one, looks.
+ *
+ * The same window for both, deliberately: a verdict that `recordOutcome` was
+ * willing to write is a verdict `record` has to be willing to preserve, and two
+ * different numbers here would mean an old correction could be silently erased
+ * by the next fill on the same page.
+ */
+export const CORRECTION_SCAN_LIMIT = 500;
+
 export class AuditRepository {
   constructor(
     private readonly collection: AuditCollection = new IndexedDbCollection<FillAuditRecord>(
@@ -70,9 +80,42 @@ export class AuditRepository {
     private readonly policy: RetentionPolicy = DEFAULT_RETENTION,
   ) {}
 
-  /** Write (or overwrite) the rows of one run. */
+  /**
+   * Write (or overwrite) the rows of one run, keeping any verdict they carry.
+   *
+   * Every write here is an UPSERT by `${runId}:${localId}`, which is what stops
+   * three fill reports producing three histories of the same field. But a fill
+   * report is built from the SCAN, so it re-writes every scanned row - including
+   * ones the user has since corrected, and including ones a later report has
+   * nothing new to say about. Written blind, "the user filled two more fields"
+   * would erase the correction they made in between.
+   *
+   * So an incoming `unreviewed` never overwrites a verdict already on disk.
+   * `unreviewed` is the absence of evidence; it cannot displace evidence.
+   * Anything else - the user accepted this suggestion - is newer and wins.
+   */
   async record(records: readonly FillAuditRecord[]): Promise<Result<void, AppError>> {
-    return this.collection.putMany(records);
+    const existing = await this.collection.listByIndex(AUDIT_TIMESTAMP_INDEX, CORRECTION_SCAN_LIMIT);
+    if (!existing.ok) return existing;
+
+    const priorOutcomes = new Map(
+      existing.value.map(normaliseOutcome).map((row) => [row.id, row]),
+    );
+
+    const merged = records.map((record) => {
+      if (record.outcome !== 'unreviewed') return record;
+      const prior = priorOutcomes.get(record.id);
+      if (prior === undefined || prior.outcome === 'unreviewed') return record;
+      return {
+        ...record,
+        outcome: prior.outcome,
+        ...(prior.supersededByLaterCorrection === true
+          ? { supersededByLaterCorrection: true }
+          : {}),
+      };
+    });
+
+    return this.collection.putMany(merged);
   }
 
   /**
@@ -132,7 +175,7 @@ export class AuditRepository {
   async recordOutcome(
     fieldFingerprint: string,
     profilePath: string | null,
-    limit = 500,
+    limit = CORRECTION_SCAN_LIMIT,
   ): Promise<Result<number, AppError>> {
     const rows = await this.collection.listByIndex(AUDIT_TIMESTAMP_INDEX, limit);
     if (!rows.ok) return rows;

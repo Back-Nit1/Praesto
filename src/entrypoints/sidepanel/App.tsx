@@ -1597,9 +1597,13 @@ function ActionGroup({
  * matched, and it would no longer correspond to what the user typed.
  */
 function asAcceptedFill(action: ResolvedFieldAction, editedValue?: string): ResolvedFieldAction {
-  if (editedValue === undefined) return { ...action, action: 'fill' };
+  // `userInitiated` is set HERE and nowhere else. It is the one place in the
+  // system that knows a person read a value and pressed a button, and the audit
+  // trail's only positive evidence depends on it not being set anywhere a
+  // machine decision could reach.
+  if (editedValue === undefined) return { ...action, action: 'fill', userInitiated: true };
   const { optionValue: _dropped, ...rest } = action;
-  return { ...rest, action: 'fill', value: editedValue };
+  return { ...rest, action: 'fill', value: editedValue, userInitiated: true };
 }
 
 /**

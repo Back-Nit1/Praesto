@@ -852,6 +852,7 @@ export default defineBackground(() => {
       localId: result.localId,
       attempted: result.attempted,
       verified: result.verified,
+      ...(result.userInitiated === true ? { userInitiated: true } : {}),
       ...(result.adapter !== undefined ? { adapter: result.adapter } : {}),
       ...(result.failureReason !== undefined ? { failureReason: result.failureReason } : {}),
     }));

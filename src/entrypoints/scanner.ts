@@ -390,6 +390,13 @@ export default defineUnlistedScript(() => {
         resolveElement: (localId) => elementsById.get(localId) ?? null,
       });
 
+      // Carried through from the action the PANEL sent. The page cannot know
+      // whether a person authorised a fill; it can only pass on what it was
+      // told, and only for the fills it was asked to run.
+      const userInitiated = new Set(
+        actions.filter((action) => action.userInitiated === true).map((action) => action.localId),
+      );
+
       await chrome.runtime
         .sendMessage({
           type: 'REPORT_FILL_RESULTS',
@@ -405,6 +412,7 @@ export default defineUnlistedScript(() => {
             profilePath: outcome.profilePath,
             attempted: outcome.attempted,
             verified: outcome.verified,
+            ...(userInitiated.has(outcome.localId) ? { userInitiated: true } : {}),
             ...(outcome.adapter !== undefined ? { adapter: outcome.adapter } : {}),
             ...(outcome.failureReason !== undefined ? { failureReason: outcome.failureReason } : {}),
           })),
