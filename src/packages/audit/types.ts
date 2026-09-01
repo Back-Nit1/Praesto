@@ -19,7 +19,8 @@
  * QUESTION was answered and WHETHER it worked; it never records the applicant's
  * answer. Enforcing that in the type means a future contributor cannot add one
  * by accident at a call site - they would have to change this file, next to
- * this paragraph. `tests/audit/redaction.test.ts` asserts it from the outside.
+ * this paragraph. The `redaction` block in `tests/audit/join.test.ts` asserts
+ * it from the outside.
  *
  * The one page-derived string kept is `detectedLabel` - the question text the
  * FORM displayed ("Preferred start date"). That is the employer's prose, not

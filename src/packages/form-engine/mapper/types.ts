@@ -40,7 +40,10 @@ export type MappingSource =
   | 'ats' // an ATS-specific rule
   | 'memory' // a learned mapping from a past correction
   | 'fuzzy' // token-overlap similarity
-  | 'semantic' // remote semantic fallback (not wired yet)
+  // Remote semantic fallback. Wired into the scan pipeline; the SAME value is
+  // recorded for a cache hit and for a fresh model call, which is why the
+  // repeated-question reuse rate in audit/metrics.ts is an upper bound.
+  | 'semantic'
   | 'none';
 
 /**

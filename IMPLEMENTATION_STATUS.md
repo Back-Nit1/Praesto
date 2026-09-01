@@ -2,8 +2,8 @@
 
 Required by `prompt.md` section 0.13. Updated as work lands.
 
-**Last updated:** 2026-08-31
-**Tests:** 665 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
+**Last updated:** 2026-09-01
+**Tests:** 699 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -150,6 +150,56 @@ fill you just performed would read as the feature being broken.
 **History never fails a fill.** Every write on that path is logged and
 swallowed. Reporting a fill that worked as failed because a history write failed
 would be a lie in the one direction this product must not tell one.
+
+---
+
+## Development metrics (spec section 26)
+
+**Four of the seven are computed; the other three are refused rather than
+estimated.** `src/packages/audit/metrics.ts` is pure — runs in, metrics out — and
+is surfaced on the options page behind a developer toggle that defaults off.
+
+**The blocker was a boolean that recorded two opposite events identically.**
+`userCorrected: boolean` was set both when we filled a field wrongly and the
+user fixed it, and when we correctly refused a field and the user taught us what
+it meant. The first is the failure section 26 names as the most important metric
+to track; the second is the learning loop working. It is now a `FieldOutcome`
+with seven states, and the incorrect-fill numerator admits exactly two of them —
+asserted by a test from outside the module, so adding an eighth outcome fails a
+test rather than silently changing what the metric means.
+
+**Silence is not evidence of correctness.** Most fields are never corrected, so
+`corrections ÷ fills` is a permanent lower bound. Every rate is an `ObservedRate`
+carrying its own denominator and the count of rows that said nothing, and there
+is no way to get a bare percentage out of it. Below twenty reviewed rows the
+screen prints "not enough evidence" and no figure at all; above it, the `≥`
+says the true rate cannot be lower and may be higher.
+
+**One correction is one piece of evidence.** A correction still marks every
+recent row sharing the fingerprint — the mapping was wrong every time it was
+used — but only the newest carries the verdict. Without that, the incorrect-fill
+rate would scale with how often the user applies to the same company.
+
+**Accepting a suggestion is the only positive signal in the system.** It is set
+by the side panel at the point of the click and carried through the page in the
+fill report; everything else the audit trail holds is a failure or a silence.
+
+**Rows written before the split read as `corrected_legacy`** and are counted in
+no numerator and excluded from every denominator. The boolean did not record
+which outcome it meant, and guessing would fabricate exactly the data this work
+exists to make trustworthy. They live in IndexedDB, which `runMigrations` does
+not walk, so they are normalised on read rather than rewritten.
+
+**Not computed, and why:**
+
+- *Field-mapping precision* and *verified-fill precision* need ground truth
+  about what each field **should** have mapped to. User history has never
+  contained that and never will. They belong to the fixture corpus, computed in
+  the test run against expected-mapping tables.
+- *Repeated-question reuse rate* is computed but is an **upper bound**:
+  `mappingSource` records `'semantic'` for a cache hit and for a fresh model
+  call alike, so a first-ever question answered by the model counts as reuse.
+  Separating them needs a cache-hit signal that does not exist.
 
 ---
 
@@ -365,6 +415,26 @@ what it knows.
    fixture server. The permission FLOW - a lapsed grant, a per-origin request -
    is therefore covered only by the panel's jsdom tests.
 
+17. **Three of the seven metrics in spec section 26 are not computed.**
+   Field-mapping precision and verified-fill precision need ground truth about
+   what each field should have mapped to, which user history never contains;
+   they belong to the fixture corpus. The repeated-question reuse rate IS
+   computed but is an upper bound, because `mappingSource: 'semantic'` does not
+   distinguish a cache hit from a fresh model call.
+
+18. **Every rate is a lower bound, and always will be.** Most fields are never
+   reviewed, so the incorrect-fill rate measures the mistakes the user
+   *reported*, not the mistakes made. The metrics screen renders the unreviewed
+   count beside every figure and refuses to print one at all below twenty
+   reviewed rows, which is the honest handling — not a fix. The fix is a fixture
+   corpus with known expected mappings.
+
+19. **No metric has ever been computed over real data.** The audit trail now
+   carries the outcomes they need, but no application has been filled outside
+   our own fixtures, so the numbers on that screen have only ever been produced
+   by tests. This is the same gap as limitation 11, and the same capture closes
+   both.
+
 ---
 
 ## Known bugs
@@ -399,6 +469,11 @@ anonymised fixture **before** fixing anything against it, then a failing test,
 then a fix in the generic engine unless it genuinely cannot go there (spec
 section 18). Expect most gaps to be missing aliases — cheap, precise fixes —
 rather than anything structural.
+
+The outcome split landed before this capture deliberately. That capture is the
+first time real corrections get generated, and a row written under the old
+`userCorrected` boolean cannot be attributed to an outcome afterwards — it can
+only be read as `corrected_legacy` and counted in nothing.
 
 Two questions the fixtures cannot answer and a real form can:
 
@@ -489,7 +564,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 665 tests
+npm test           # 699 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```

@@ -225,6 +225,41 @@ before writing over it, however new it looks.
 
 ---
 
+## 10. What the metrics still cannot establish
+
+Added 2026-09-01, on landing `METRICS_BRIEF.md`. Four of the seven metrics in
+spec section 26 are now computed from the audit trail
+(`src/packages/audit/metrics.ts`). What follows is what those numbers do **not**
+say, recorded here because a metrics screen is the one surface where a
+comfortable number would make every refusal elsewhere in the product a lie.
+
+**Every rate is a lower bound.** Most fields are never corrected, so the
+incorrect-fill rate counts the mistakes the user told us about, not the mistakes
+made. The screen renders the unreviewed count beside every figure and prints
+nothing at all below twenty reviewed rows. That is honest handling, not a fix.
+The fix is ground truth, which user history structurally cannot contain.
+
+**Precision belongs to the fixture corpus and does not exist yet.**
+Field-mapping precision and verified-fill precision need to know what each field
+*should* have mapped to. The route is a corpus with expected-mapping tables,
+computed in the test run and emitted as a file — not derived from production
+rows, which is how the conflation this work removed would come back in a new
+costume.
+
+**The reuse rate cannot tell a cache hit from a fresh model call.**
+`MappingSource` records `'semantic'` for both, so a first-ever question answered
+by the model is counted as a repeated question reused. Closing it is one flag on
+the mapping result, and it is the only genuinely missing signal of the seven.
+
+**Nothing has been measured over real data.** No application has been filled
+outside our own fixtures, so every figure that screen can show has so far been
+produced by a test. This is gap #1 wearing different clothes: the real-form
+capture is what turns these from plumbing into evidence, and it has to happen
+after the outcome split rather than before — a row written under the old
+`userCorrected` boolean can only ever read as `corrected_legacy`.
+
+---
+
 ## What is NOT a gap
 
 Recorded so these are not re-litigated:
