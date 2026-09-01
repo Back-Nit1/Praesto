@@ -429,7 +429,14 @@ function classifyControl(element: HTMLElement, tag: string, type?: string): Cont
  * offsetParent, hence the exemption.
  */
 function isVisible(element: HTMLElement): boolean {
-  if (element.hidden) return false;
+  // The attribute, on this element OR any ancestor. A conditional question is
+  // usually revealed by unhiding the BLOCK that contains it, not the input, and
+  // the browser's own `[hidden] { display: none }` is only a default an author
+  // stylesheet is free to override. Reading the attribute directly means the
+  // rule holds on a page whose CSS reset dropped it, and the direction of the
+  // mistake is the safe one: we refuse a field rather than fill one nobody can
+  // see.
+  if (element.closest('[hidden]') !== null) return false;
 
   const style = window.getComputedStyle(element);
   if (style.display === 'none' || style.visibility === 'hidden') return false;

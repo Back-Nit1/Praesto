@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  Fixture: a question that only exists once another is answered (spec 16, 25.2).
+
+  The sponsorship question is always present. The visa question below it is
+  `hidden` until the answer is "Yes", which is how conditional questions are
+  built on real applications - the markup is in the document from the start and
+  is revealed, not fetched.
+
+  Two things this fixture is for:
+
+    1. A hidden control must NOT be described as a field. A scan that reports it
+       would produce a panel row for a question the user cannot see, and a fill
+       that writes into a box nobody is looking at.
+    2. Revealing it must produce a real field. That is the incremental-rescan
+       path (roadmap item 7): the MutationObserver signal is wired, the
+       incremental scan is not, so today this costs a full rescan and a click.
+
+  The test drives the reveal directly rather than by clicking, because what is
+  under test is the SCANNER's answer before and after - not the page's own
+  script, which is ours and would only be testing itself.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Dependent question</title></head>
+  <body>
+    <form>
+      <label for="sponsorship">Will you now or in the future require sponsorship for employment?</label>
+      <select id="sponsorship" name="requires_sponsorship" required>
+        <option value="">Select...</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+
+      <div id="visa-details" hidden>
+        <label for="visa-type">Which visa do you currently hold?</label>
+        <input id="visa-type" name="visa_type" type="text" />
+      </div>
+
+      <script>
+        // Present so the fixture behaves like the real thing when served by
+        // `npm run fixtures`. The tests do not rely on it.
+        document.getElementById('sponsorship').addEventListener('change', (event) => {
+          document.getElementById('visa-details').hidden = event.target.value !== 'yes';
+        });
+      </script>
+    </form>
+  </body>
+</html>

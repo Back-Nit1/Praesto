@@ -1,0 +1,52 @@
+<!doctype html>
+<!--
+  Fixture: the employment section (spec 25.2).
+
+  One position, asked the way most ATS forms ask it, plus the two controls that
+  are not plain text: a "currently work here" checkbox that governs whether the
+  end date means anything, and a free-text description that no profile field
+  should ever be written into on our own authority.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Employment</title></head>
+  <body>
+    <form>
+      <fieldset>
+        <legend>Work experience</legend>
+
+        <label for="employer">Employer</label>
+        <input id="employer" name="company" type="text" required />
+
+        <label for="title">Job title</label>
+        <input id="title" name="title" type="text" required />
+
+        <label for="location">Location</label>
+        <input id="location" name="job_location" type="text" />
+
+        <label for="emp-start">Start date</label>
+        <input id="emp-start" name="employment_start_date" type="text" placeholder="MM/YYYY" />
+
+        <label for="emp-end">End date</label>
+        <input id="emp-end" name="employment_end_date" type="text" placeholder="MM/YYYY" />
+
+        <!--
+          A boolean that CHANGES THE MEANING of the field above it. Filling this
+          wrongly does not leave a blank - it asserts something false about the
+          applicant's current job.
+        -->
+        <label for="current">
+          <input id="current" name="currently_employed" type="checkbox" />
+          I currently work here
+        </label>
+
+        <!--
+          Free response. The profile has a `description`, but nothing here says
+          this box wants the same prose, and composing one is out of scope
+          (roadmap item 11). The honest outcome is to leave it alone.
+        -->
+        <label for="duties">Describe your responsibilities</label>
+        <textarea id="duties" name="description" rows="4"></textarea>
+      </fieldset>
+    </form>
+  </body>
+</html>

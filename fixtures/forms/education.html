@@ -1,0 +1,65 @@
+<!doctype html>
+<!--
+  Fixture: the education section (spec 25.2).
+
+  Two blocks, because that is where the interesting failure is. The first is a
+  plainly labelled degree; the second is a repeat of the same six questions for
+  a second school, distinguished only by its heading.
+
+  What this fixture is FOR is the multi-entry heuristic in
+  profile/selectors.ts, which decides which of the applicant's degrees an
+  unqualified "School" means. That heuristic is unit-tested and has never been
+  run through an actual form.
+-->
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Education</title></head>
+  <body>
+    <form>
+      <fieldset>
+        <legend>Education</legend>
+
+        <label for="school-1">School</label>
+        <input id="school-1" name="school" type="text" required />
+
+        <label for="degree-1">Degree</label>
+        <select id="degree-1" name="degree">
+          <option value="">Select...</option>
+          <option value="bs">Bachelor's Degree</option>
+          <option value="ms">Master's Degree</option>
+        </select>
+
+        <label for="major-1">Major</label>
+        <input id="major-1" name="discipline" type="text" />
+
+        <label for="start-1">Start date</label>
+        <input id="start-1" name="education_start_date" type="text" placeholder="MM/YYYY" />
+
+        <label for="grad-1">Graduation date</label>
+        <input id="grad-1" name="graduation_date" type="text" placeholder="MM/YYYY" />
+
+        <label for="gpa-1">GPA</label>
+        <input id="gpa-1" name="gpa" type="text" />
+      </fieldset>
+
+      <!--
+        The same six questions again. Nothing in the markup of these controls
+        says "second"; only the heading does. A system that reads the heading
+        answers them from the second degree, and one that does not answers all
+        twelve from the first - which is the honest failure, and is what the
+        test on this fixture pins down.
+      -->
+      <fieldset>
+        <legend>Education 2</legend>
+
+        <label for="school-2">School</label>
+        <input id="school-2" name="school_2" type="text" />
+
+        <label for="degree-2">Degree</label>
+        <input id="degree-2" name="degree_2" type="text" />
+
+        <label for="major-2">Major</label>
+        <input id="major-2" name="discipline_2" type="text" />
+      </fieldset>
+    </form>
+  </body>
+</html>

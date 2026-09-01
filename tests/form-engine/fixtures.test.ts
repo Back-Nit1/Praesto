@@ -23,7 +23,14 @@ import { mapField } from '@form-engine/mapper/mapper';
 import { resolveValue } from '@form-engine/resolver/resolver';
 import { decideFill } from '@form-engine/confidence/policy';
 import { __setRuntimeBudgetForTesting, budgetFor } from '@shared/runtime-budget';
-import { createEmptyProfile, userValue, type ApplicantProfile } from '@profile/schema';
+import {
+  createEmptyProfile,
+  emptyValue,
+  userValue,
+  type ApplicantProfile,
+  type Education,
+  type Employment,
+} from '@profile/schema';
 import { parsePhone } from '@profile/normalizers/phone';
 import { parseDate } from '@profile/normalizers/date';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
@@ -85,11 +92,77 @@ function verifiedProfile(): ApplicantProfile {
   return profile;
 }
 
+/**
+ * A profile with a history, for the fixtures that ask about one.
+ *
+ * Two degrees and two jobs, most-recent LAST, because that is the order people
+ * type them in and the order a resume lists them - which is exactly what makes
+ * "which one does an unqualified 'School' mean" a real question rather than an
+ * academic one.
+ */
+function profileWithHistory(): ApplicantProfile {
+  const profile = verifiedProfile();
+
+  profile.education = [
+    education({ institution: 'Rutgers University', degree: "Bachelor's Degree", field: 'Computer Science', graduation: 'May 2025', gpa: '3.7' }),
+    education({ institution: 'Georgia Institute of Technology', degree: "Master's Degree", field: 'Computer Science', graduation: 'May 2027', gpa: '3.9' }),
+  ];
+
+  profile.employment = [
+    employment({ company: 'Northwind Systems', title: 'Software Engineer Intern', location: 'Newark, NJ', start: 'June 2024', end: 'August 2024' }),
+    employment({ company: 'Acme Robotics', title: 'Software Engineer', location: 'Remote', start: 'January 2026', current: true }),
+  ];
+
+  return profile;
+}
+
+function education(fields: {
+  institution: string;
+  degree: string;
+  field: string;
+  graduation: string;
+  gpa: string;
+}): Education {
+  const graduation = parseDate(fields.graduation);
+  return {
+    id: `edu-${fields.institution.toLowerCase().replace(/\W+/g, '-')}`,
+    institution: userValue(fields.institution),
+    degree: userValue(fields.degree),
+    fieldOfStudy: userValue(fields.field),
+    startDate: emptyValue(),
+    graduationDate: graduation === null ? emptyValue() : userValue(graduation, fields.graduation),
+    gpa: userValue(fields.gpa),
+  };
+}
+
+function employment(fields: {
+  company: string;
+  title: string;
+  location: string;
+  start: string;
+  end?: string;
+  current?: boolean;
+}): Employment {
+  const start = parseDate(fields.start);
+  const end = fields.end === undefined ? null : parseDate(fields.end);
+  return {
+    id: `job-${fields.company.toLowerCase().replace(/\W+/g, '-')}`,
+    company: userValue(fields.company),
+    title: userValue(fields.title),
+    location: userValue(fields.location),
+    startDate: start === null ? emptyValue() : userValue(start, fields.start),
+    endDate: end === null ? emptyValue() : userValue(end, fields.end),
+    currentlyEmployed: userValue(fields.current === true),
+    description: emptyValue(),
+    bullets: emptyValue(),
+  };
+}
+
 /** Run the whole pipeline over a fixture, as the service worker would. */
-async function analyse(fixture: string) {
+async function analyse(fixture: string, withProfile: ApplicantProfile = verifiedProfile()) {
   const doc = loadFixture(fixture);
   const { result } = await scanPage(doc, { ats: 'unknown' });
-  const profile = verifiedProfile();
+  const profile = withProfile;
 
   return result.fields.map((field: FieldDescriptor) => {
     const mapping = mapField(field);
@@ -110,6 +183,8 @@ async function analyse(fixture: string) {
 
     return {
       label: field.label ?? field.name ?? field.localId,
+      name: field.name,
+      required: field.required,
       path: mapping.profilePath,
       confidence: mapping.confidence,
       decision,
@@ -272,6 +347,106 @@ describe('fixture: native-select.html', () => {
 
     expect(month.ok && month.resolved.value).toBe('5');
     expect(year.ok && year.resolved.value).toBe('2027');
+  });
+});
+
+describe('fixture: education.html', () => {
+  it('answers a plainly labelled degree block from the profile', async () => {
+    const results = await analyse('education.html', profileWithHistory());
+    const bySchool = results.find((r) => r.name === 'school');
+
+    expect(bySchool?.path).toBe('education[0].institution');
+    expect(bySchool?.decision).toBe('autofill');
+  });
+
+  it('reads the GPA as the string the institution issued, not as a number', async () => {
+    const results = await analyse('education.html', profileWithHistory());
+    const gpa = results.find((r) => r.name === 'gpa');
+
+    expect(gpa?.value).toBe('3.7');
+  });
+
+  it('marks the school field required, because the form did', async () => {
+    const results = await analyse('education.html', profileWithHistory());
+
+    expect(results.find((r) => r.name === 'school')?.required).toBe(true);
+    expect(results.find((r) => r.name === 'gpa')?.required).toBe(false);
+  });
+
+  it('answers a SECOND school block from the first degree - the known limitation', async () => {
+    // Recorded rather than asserted as correct. Nothing in the markup of the
+    // second block says "second"; only the legend does, and the mapper is not
+    // given an entry index here. Limitation 3 in IMPLEMENTATION_STATUS.md, and
+    // the fixture that will fail the day it is fixed.
+    const results = await analyse('education.html', profileWithHistory());
+    const second = results.find((r) => r.name === 'school_2');
+
+    expect(second?.path).toBe('education[0].institution');
+  });
+});
+
+describe('fixture: employment.html', () => {
+  it('answers employer and job title from the profile', async () => {
+    const results = await analyse('employment.html', profileWithHistory());
+
+    expect(results.find((r) => r.name === 'company')?.path).toBe('employment[0].company');
+    expect(results.find((r) => r.name === 'title')?.path).toBe('employment[0].title');
+  });
+
+  it('leaves the free-text responsibilities box alone', async () => {
+    // There is an `employment[].description` in the profile, and nothing says
+    // this box wants the same prose. Composing one is out of scope; writing the
+    // wrong one into an application is worse than leaving it blank.
+    const results = await analyse('employment.html', profileWithHistory());
+    const duties = results.find((r) => r.name === 'description');
+
+    expect(duties?.decision).toBe('skip');
+  });
+
+  it('answers "I currently work here" only from a value the user stated', async () => {
+    // The checkbox changes what the end date MEANS. Getting it wrong does not
+    // leave a blank - it states something false about the applicant. So it is
+    // filled when the profile says so and refused when it does not, rather than
+    // inferred from an absent end date.
+    const stated = await analyse('employment.html', profileWithHistory());
+    expect(stated.find((r) => r.name === 'currently_employed')?.decision).toBe('autofill');
+
+    const unstated = profileWithHistory();
+    const firstJob = unstated.employment[0];
+    if (firstJob !== undefined) firstJob.currentlyEmployed = emptyValue();
+
+    const refused = await analyse('employment.html', unstated);
+    expect(refused.find((r) => r.name === 'currently_employed')?.decision).not.toBe('autofill');
+  });
+});
+
+describe('fixture: dynamic-dependent-question.html', () => {
+  it('does not describe a question the page is still hiding', async () => {
+    const doc = loadFixture('dynamic-dependent-question.html');
+    const { result } = await scanPage(doc, { ats: 'unknown' });
+
+    // A row in the panel for a question the user cannot see is a row they
+    // cannot act on, and a fill into a box nobody is looking at.
+    expect(result.fields.map((field) => field.name)).not.toContain('visa_type');
+    expect(result.fields.map((field) => field.name)).toContain('requires_sponsorship');
+  });
+
+  it('describes it once the answer reveals it', async () => {
+    const doc = loadFixture('dynamic-dependent-question.html');
+    doc.getElementById('visa-details')?.removeAttribute('hidden');
+
+    const { result } = await scanPage(doc, { ats: 'unknown' });
+
+    expect(result.fields.map((field) => field.name)).toContain('visa_type');
+  });
+
+  it('refuses the sponsorship question rather than answering it from a guess', async () => {
+    // Spec 21.3: work authorization needs an explicit user statement, and this
+    // profile has not made one. A confident MAPPING is not permission.
+    const results = await analyse('dynamic-dependent-question.html');
+    const sponsorship = results.find((r) => r.name === 'requires_sponsorship');
+
+    expect(sponsorship?.decision).not.toBe('autofill');
   });
 });
 
