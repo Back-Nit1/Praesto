@@ -169,6 +169,76 @@ async function scanWith(
   await screen.findByText(/fields detected/i);
 }
 
+describe('side panel - required fields still blank', () => {
+  it('names a required field it did not understand, instead of burying it in "Left blank"', async () => {
+    await scanWith([
+      action({ localId: 'f_1' }),
+      action({
+        localId: 'f_2',
+        action: 'skip',
+        profilePath: null,
+        value: undefined,
+        required: true,
+        explanation: 'Not recognised',
+        knowledgeState: 'unknown',
+      }),
+    ]);
+
+    // The row someone about to press submit actually needs.
+    expect(screen.getByText(/required, still blank \(1\)/i)).toBeTruthy();
+  });
+
+  it('does not list a required field the page had already answered', async () => {
+    await scanWith([
+      action({
+        localId: 'f_2',
+        action: 'skip',
+        profilePath: null,
+        value: undefined,
+        required: true,
+        prefilled: true,
+        explanation: 'Already filled',
+      }),
+    ]);
+
+    expect(screen.queryByText(/required, still blank/i)).toBeNull();
+  });
+
+  it('keeps a required field on the list until the page reads the value back', async () => {
+    await scanWith([action({ localId: 'f_1', required: true })]);
+
+    expect(screen.getByText(/required, still blank \(1\)/i)).toBeTruthy();
+
+    reply('CONTENT_FILL', {
+      ok: true,
+      outcomes: [{ localId: 'f_1', attempted: true, verified: false, failureReason: 'rejected' }],
+    });
+    click(/fill 1 safe field/i);
+
+    // Attempted and not verified is still blank. "We sent it" has never been
+    // good enough anywhere else in this panel. The failure is named twice on
+    // purpose: once in the group that did the fill, once in the list of what
+    // still stops a submit.
+    await waitFor(() =>
+      expect(screen.getAllByText(/the page refused the value/i)).toHaveLength(2),
+    );
+    expect(screen.getByText(/required, still blank \(1\)/i)).toBeTruthy();
+  });
+
+  it('drops a required field from the list once the fill verifies', async () => {
+    await scanWith([action({ localId: 'f_1', required: true })]);
+
+    reply('CONTENT_FILL', {
+      ok: true,
+      outcomes: [{ localId: 'f_1', attempted: true, verified: true, adapter: 'NativeText' }],
+    });
+    click(/fill 1 safe field/i);
+
+    await screen.findByText(/1 field filled and verified/i);
+    expect(screen.queryByText(/required, still blank/i)).toBeNull();
+  });
+});
+
 describe('side panel - reporting what happened', () => {
   it('does not claim a field was filled when the page rejected it', async () => {
     await scanWith([action({})]);

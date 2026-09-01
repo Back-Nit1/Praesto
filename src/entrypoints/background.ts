@@ -496,7 +496,7 @@ export default defineBackground(() => {
           learned,
           entryIndexes,
         );
-        actions.push(resolved.action);
+        actions.push(withFormFacts(resolved.action, descriptor as FieldDescriptor));
         auditFields.push(resolved.audit);
         if (resolved.outcome !== undefined) outcomes.push(resolved.outcome);
       } catch (error) {
@@ -886,6 +886,29 @@ export default defineBackground(() => {
     const pruned = await auditHistory.prune(now);
     if (!pruned.ok) log.warn('Could not prune application history', pruned.error.code);
     else if (pruned.value > 0) log.debugLazy(() => [`Pruned ${pruned.value} history rows`]);
+  }
+
+/**
+   * Attach what the FORM said about a field to the action the panel receives.
+   *
+   * Kept out of `resolveOneField` because these are not decisions - they are the
+   * employer's markup, copied through unchanged, and every branch of that
+   * function would otherwise have to remember to carry them.
+   *
+   * `prefilled` is a boolean and never the value. The panel needs to know that a
+   * required field is already answered; it does not need to know what the answer
+   * is, and a value in this message would be page content travelling for no
+   * reason - see the data-minimisation note in messages.ts.
+   */
+  function withFormFacts(
+    action: ResolvedFieldAction,
+    descriptor: FieldDescriptor,
+  ): ResolvedFieldAction {
+    return {
+      ...action,
+      ...(descriptor.required ? { required: true } : {}),
+      ...((descriptor.currentValue ?? '').trim().length > 0 ? { prefilled: true } : {}),
+    };
   }
 
   /**

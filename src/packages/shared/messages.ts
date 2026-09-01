@@ -308,6 +308,27 @@ export const resolvedFieldActionSchema = z.object({
   controlKind: controlKindSchema.optional(),
   profilePath: z.string().nullable(),
   /**
+   * The FORM said this field is required (`required`, or `aria-required`).
+   *
+   * Sent back so the panel can name the fields that will stop a submit. It is
+   * the employer's own markup, not anything about the applicant, which is why
+   * it may cross this boundary at all.
+   *
+   * Optional so an older side panel keeps working; absent means "we were not
+   * told", never "optional".
+   */
+  required: z.boolean().optional(),
+  /**
+   * The control already held a value when we scanned.
+   *
+   * A BOOLEAN, never the value. The panel needs it to tell "required and still
+   * empty" - the row that matters before a submit - apart from "required, and
+   * the page had already answered it", which is not the user's problem. Sending
+   * the value itself would put page content the applicant may have typed into a
+   * message that does not need it.
+   */
+  prefilled: z.boolean().optional(),
+  /**
    * This action exists because a person read a suggestion and accepted it.
    *
    * Set by the side panel at the point of the click, never by the worker - the

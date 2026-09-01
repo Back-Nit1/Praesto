@@ -1287,6 +1287,30 @@ function ScanReport({
   const review = actions.filter((action) => action.action === 'suggest');
   const skipped = actions.filter((action) => action.action === 'skip');
 
+  /**
+   * REQUIRED, AND STILL EMPTY.
+   *
+   * The single most useful row on this panel for someone about to press submit,
+   * and until now it was mixed into "Left blank" with every optional question we
+   * did not understand (spec section 33: "identify unanswered required fields").
+   *
+   * Three things put a field here, and they are deliberately together because
+   * the user's next action is the same for all three - type it in by hand:
+   *   - we did not understand it,
+   *   - we offered a value and they have not accepted it yet,
+   *   - we tried to fill it and the page did not take it.
+   *
+   * A field the PAGE had already answered is not here. It is required and it is
+   * answered, which is not the user's problem.
+   */
+  const requiredBlank = actions.filter((action) => {
+    if (action.required !== true || action.prefilled === true) return false;
+    // A skip was never attempted, so it is empty by definition. Anything else
+    // is empty unless the page READ THE VALUE BACK - "we sent it" has never
+    // been good enough anywhere else in this panel and is not here either.
+    return action.action === 'skip' || outcomes[action.localId]?.verified !== true;
+  });
+
   /** Fields we have already attempted, so a second click does not redo them. */
   const attempted = (candidates: ResolvedFieldAction[]): ResolvedFieldAction[] =>
     candidates.filter((action) => outcomes[action.localId] !== undefined);
@@ -1428,6 +1452,22 @@ function ScanReport({
         </p>
       </section>
 
+      {/* ABOVE the review list, and open. Everything else on this panel is
+          something we did; this is the list of what the form will refuse to
+          accept without the user. A field can appear here and in one of the
+          groups below - the same field, seen two ways - which is correct: this
+          group answers "what stops me submitting", the others answer "what did
+          the extension do". */}
+      {requiredBlank.length > 0 && (
+        <ActionGroup
+          title={`Required, still blank (${requiredBlank.length})`}
+          actions={requiredBlank}
+          outcomes={outcomes}
+          onFill={onFill}
+          onCorrect={onCorrect}
+          busy={busy}
+        />
+      )}
       {review.length > 0 && (
         <ActionGroup
           title="Needs your review"
