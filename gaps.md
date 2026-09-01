@@ -260,6 +260,34 @@ after the outcome split rather than before — a row written under the old
 
 ---
 
+## 11. What the incremental rescan does not notice
+
+Added 2026-09-01, on landing roadmap item 7. A revealed question now costs a scan
+of the block it appeared in rather than a pass over the whole form. Three things
+it does not do, none of which is a bug in what was built:
+
+**A removed field keeps its row.** The observer records subtrees that GAINED
+element nodes. A conditional block that disappears when the answer changes back
+leaves its questions in the panel until a full rescan. The direction is the safe
+one - a stale row is visible and inert, where a missing row would be a question
+nobody was told about - but it is stale.
+
+**A field that changes without moving is invisible.** The observer watches
+`childList` only. A control that becomes `required`, stops being `disabled`, or
+gains options after a fetch produces no mutation we act on, so the panel goes on
+describing it as it was at scan time. Watching attributes would mean a callback
+on every keystroke-driven class change on a busy form, which is why it is not
+done by default rather than an oversight - closing it properly means an
+attribute filter naming the few attributes that change a field's MEANING.
+
+**Overflow is a cliff, not a slope.** Past sixteen distinct changed subtrees the
+next scan is a full one. A form that reveals one question in each of twenty
+sections therefore pays for a full pass, which is correct and is exactly the case
+the incremental path was built for. The number is a guess and has never been
+measured against a real form.
+
+---
+
 ## What is NOT a gap
 
 Recorded so these are not re-litigated:

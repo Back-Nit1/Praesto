@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-09-01
-**Tests:** 699 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
+**Tests:** 732 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -203,6 +203,30 @@ not walk, so they are normalised on read rather than rewritten.
 
 ---
 
+## The settings screen, and required fields
+
+Two surfaces added on 2026-09-01, both of which existed as data the UI never
+read.
+
+**Required-but-blank fields are named** (spec §33). `required` was captured by
+the scanner and typed on the descriptor from the beginning, and nothing read it
+— so a required question we did not understand sat in "Left blank" beside every
+optional one. It now has its own group above the review list, holding the three
+situations whose next action is the same: not understood, offered and not
+accepted, or attempted and refused by the page. A field the page had already
+answered is not listed. `prefilled` crosses the message boundary as a boolean,
+never as the value.
+
+**Settings** holds what the panel deliberately does not: today's model-call
+spend and the last twenty scans' costs, the count of remembered questions with a
+way to forget them, and the developer toggle. It is read between applications,
+not during one — the same reasoning that keeps mapping metadata out of the
+panel. `SemanticConceptCache.clear()` had existed since the cache was written
+with nothing calling it, so a wrong cached concept could previously only be
+escaped by wiping all extension data.
+
+---
+
 ## Phase 5 — Learned corrections
 
 - [x] Learned-mapping schema and repository
@@ -397,17 +421,19 @@ what it knows.
    purpose. At the 500-entry cap the difference is theoretical, but a user who
    met 500 novel questions would start paying again for their oldest ones.
 
-14. **Nothing renders the model-call count or the remaining quota on a
-   successful scan.** The panel is silent unless the fallback failed, which is
-   deliberate — a panel that narrates its own internals every scan is one the
-   user stops reading. But it means "how much of my daily budget did this form
-   cost" is currently unanswerable from the UI.
+14. **The panel still says nothing about model calls on a successful scan**, and
+   that part is deliberate — a panel that narrates its own internals every scan
+   is one the user stops reading. "How much of my daily budget did this form
+   cost" is now answered on the settings screen instead, from a log of the last
+   twenty scans that holds a time and a count and nothing else. What no surface
+   can say is WHICH questions a scan's calls answered.
 
 15. **A cached concept is never re-examined.** If a model's answer for a
    question was wrong, the user corrects the field once and the existing
    learned-mapping path takes over at higher confidence — but the wrong cached
-   concept stays until the cache is cleared. There is a `clear()`, and no UI
-   calls it yet.
+   concept stays until the cache is cleared. The settings screen now clears it,
+   all of it: there is no way to forget ONE wrong reading, and the cache does
+   not record which question a user later contradicted.
 
 16. **The end-to-end suite grants host permission statically.** `activeTab` is
    granted by a click on the toolbar icon, which is browser chrome and cannot
@@ -429,7 +455,19 @@ what it knows.
    reviewed rows, which is the honest handling — not a fix. The fix is a fixture
    corpus with known expected mappings.
 
-19. **No metric has ever been computed over real data.** The audit trail now
+19. **The incremental rescan sees additions only.** A revealed question is
+   scanned where it appeared (spec §16), but a conditional block that
+   DISAPPEARS leaves its rows in the panel until a full rescan, and a field that
+   merely becomes required or enabled produces no mutation the observer acts on.
+   Both are written up in `gaps.md` §11.
+
+20. **A scan's cost is recorded, but nothing records what it bought.** The
+   settings screen can say a scan spent three model calls; it cannot say which
+   three questions they answered, because the log deliberately holds a time and
+   a count. Answering that would mean joining it to history, which is a
+   disclosure decision rather than a missing feature.
+
+21. **No metric has ever been computed over real data.** The audit trail now
    carries the outcomes they need, but no application has been filled outside
    our own fixtures, so the numbers on that screen have only ever been produced
    by tests. This is the same gap as limitation 11, and the same capture closes
@@ -564,7 +602,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 699 tests
+npm test           # 732 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```

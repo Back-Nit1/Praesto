@@ -1,7 +1,8 @@
 # Roadmap
 
-**Written:** 2026-09-01.
-**Code at that date:** `npm run verify` clean, 665 tests. Phases 0–5 done, phase 6
+**Written:** 2026-09-01. **Updated:** 2026-09-01, on landing items 1, 4, 5, 6, 7
+and 8.
+**Code at that date:** `npm run verify` clean, 732 tests. Phases 0–5 done, phase 6
 done except for running against real applications, phase 7 not started, phase 8
 partly done.
 
@@ -28,21 +29,29 @@ today, where to look, and how you know you're finished.
 
 ## The short answer
 
-Next three, in order:
+Two left, in order, and both need something outside this repo:
 
-1. Replace the audit `userCorrected` boolean with a `FieldOutcome`. Small, and it
-   has to happen before real corrections start piling up.
-2. Run the extension against real Greenhouse, Lever and Ashby applications.
-3. Build the two backend endpoints: `/v1/semantic/concepts` and
+1. Run the extension against real Greenhouse, Lever and Ashby applications.
+2. Build the two backend endpoints: `/v1/semantic/concepts` and
    `/v1/semantic/option`.
 
-Everything after those three is optional until they're done.
+Everything else that could be built without a real form or a server has been:
+items 1, 4, 5, 6, 7 and 8 are done. Nothing further should be started before
+item 2 — the whole point of it is that it changes what the rest of the list is
+worth doing.
 
 ---
 
 ## Now
 
 ### 1. Split the audit outcome — before anything starts generating corrections
+
+**DONE**, 2026-09-01 (`7bbb42b`, `3dfc4bf`). `FieldOutcome` replaces the boolean,
+a correction is attributed to one run, and legacy rows read as
+`corrected_legacy` and are counted in nothing. Two things turned up while doing
+it and are fixed rather than absorbed: an upsert could erase a verdict the user
+had just recorded, and accepting a suggestion produced a report indistinguishable
+from an automatic fill, so the audit trail held no positive evidence at all.
 
 **What.** Replace `FillAuditRecord.userCorrected: boolean` with a `FieldOutcome`
 enum. Fix the double-count in `AuditRepository.markCorrected` (correcting the
@@ -133,6 +142,11 @@ with the run's cost recorded.
 
 ### 4. Show required fields that were left blank
 
+**DONE**, 2026-09-01 (`81124b0`). A "Required, still blank" group above the
+review list, covering three situations with the same next action: we did not
+understand it, we offered a value nobody has accepted, or the page refused the
+fill. A field the page had already answered is not listed.
+
 **What.** Surface required-but-empty fields as their own thing in the panel.
 
 **Why it's a gap.** `required` is captured by the scanner and typed on the
@@ -149,6 +163,12 @@ most useful row for someone about to hit submit. Spec §33 asks for it directly.
 
 ### 5. The three missing spec §25.2 fixtures
 
+**DONE**, 2026-09-01 (`e31857a`). Found a real gap while writing the third:
+`isVisible` read `element.hidden` on the control only, and a conditional question
+is revealed by unhiding the BLOCK around it. It held in Chrome only because of
+the UA stylesheet's `[hidden] { display: none }`, which a page is free to
+override.
+
 **What.** `education.html`, `employment.html`, `dynamic-dependent-question.html`.
 
 **Why it's a gap.** §16 is the only spec section with no fixture at all, so the
@@ -160,6 +180,10 @@ but has never been run through an actual form.
 ---
 
 ### 6. Let the user clear the concept cache, and show what a scan cost
+
+**DONE**, 2026-09-01 (`271c462`). A settings screen, holding both, plus the
+developer toggle. The scan-cost log is a time and a count per scan and nothing
+else — history already records which forms were filled.
 
 **What.** Two settings-screen additions: a button that calls
 `SemanticConceptCache.clear()`, and a per-scan cost readout.
@@ -177,6 +201,10 @@ stops reading.
 
 ### 7. Rescan only the subtree that changed
 
+**DONE**, 2026-09-01 (`3fd0f81`). Additions only: a field REMOVED from the page
+still leaves its row, and a field that merely becomes required or enabled is not
+noticed at all. Both are written into `gaps.md` §11 rather than left implied.
+
 **What.** Build descriptors for new and changed controls instead of rescanning
 the page (spec §16).
 
@@ -190,6 +218,12 @@ the user asked.
 ---
 
 ### 8. The metrics module
+
+**DONE**, 2026-09-01 (`306b420`, `968da3b`) — ahead of item 2 rather than after
+it, because the type split in item 1 had to land before any real corrections
+were generated and the module is what proves that split works. It computes four
+of the seven §26 metrics over whatever data exists; item 2 is what gives it data
+worth reading.
 
 **What.** The rest of the metrics brief, after item 1 lands and item 2 has
 produced real rows to count. Ships behind the developer toggle §22 asks for,
