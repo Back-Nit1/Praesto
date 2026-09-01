@@ -59,6 +59,7 @@ import { decideFill } from '@form-engine/confidence/policy';
 import type { FieldDescriptor } from '@form-engine/descriptor/types';
 import { BackendGateway } from '@backend/gateway';
 import { ScanCostLog } from '@backend/usage-log';
+import { stampFormFacts } from '@shared/form-facts';
 import { createSemanticPort } from '@backend/semantic';
 import {
   applySemanticFallback,
@@ -498,7 +499,7 @@ export default defineBackground(() => {
           learned,
           entryIndexes,
         );
-        actions.push(withFormFacts(resolved.action, descriptor as FieldDescriptor));
+        actions.push(resolved.action);
         auditFields.push(resolved.audit);
         if (resolved.outcome !== undefined) outcomes.push(resolved.outcome);
       } catch (error) {
@@ -539,6 +540,12 @@ export default defineBackground(() => {
       cache: semanticCache,
     });
     applyUpdates(semantic.updates, actions, auditFields);
+
+    // AFTER every decision, including the semantic pass's - that pass REPLACES
+    // an action object rather than editing it, so anything stamped earlier is
+    // silently lost on exactly the fields the fallback helped with. Stamped
+    // here, no future pass can drop them. See @shared/form-facts.
+    stampFormFacts(actions, request.fields as FieldDescriptor[]);
 
     /**
      * Reported only when the pass actually ran. The quota is read ONLY on a
@@ -897,29 +904,6 @@ export default defineBackground(() => {
     const pruned = await auditHistory.prune(now);
     if (!pruned.ok) log.warn('Could not prune application history', pruned.error.code);
     else if (pruned.value > 0) log.debugLazy(() => [`Pruned ${pruned.value} history rows`]);
-  }
-
-/**
-   * Attach what the FORM said about a field to the action the panel receives.
-   *
-   * Kept out of `resolveOneField` because these are not decisions - they are the
-   * employer's markup, copied through unchanged, and every branch of that
-   * function would otherwise have to remember to carry them.
-   *
-   * `prefilled` is a boolean and never the value. The panel needs to know that a
-   * required field is already answered; it does not need to know what the answer
-   * is, and a value in this message would be page content travelling for no
-   * reason - see the data-minimisation note in messages.ts.
-   */
-  function withFormFacts(
-    action: ResolvedFieldAction,
-    descriptor: FieldDescriptor,
-  ): ResolvedFieldAction {
-    return {
-      ...action,
-      ...(descriptor.required ? { required: true } : {}),
-      ...((descriptor.currentValue ?? '').trim().length > 0 ? { prefilled: true } : {}),
-    };
   }
 
   /**

@@ -8,7 +8,7 @@
  * promises the brief makes that no type can enforce on its own.
  */
 import { describe, expect, it } from 'vitest';
-import { resolveConcepts } from '@semantic/concept';
+import { resolveConcepts, conceptPayloadDigestFor } from '@semantic/concept';
 import { chooseOption, matchOption } from '@semantic/option-match';
 import { SemanticConceptCache } from '@semantic/cache';
 import { collectRefusals } from '@semantic/queue';
@@ -144,7 +144,9 @@ describe('stage 1 - the cache', () => {
   it('performs ZERO calls when every question is already known', async () => {
     const field = novel('Which campus did you attend?');
     const cache = newCache();
-    await cache.record(computeFingerprints(field), 'education[0].institution');
+    await cache.record(computeFingerprints(field), 'education[0].institution', {
+      payloadDigest: conceptPayloadDigestFor(field),
+    });
 
     const port = new FakeSemanticPort();
     const outcome = await resolveConcepts({ fields: queueOf(field), port, cache });
@@ -157,7 +159,9 @@ describe('stage 1 - the cache', () => {
   it('does not even construct a request when the cache answers - a forbidden port is never touched', async () => {
     const field = novel('Which campus did you attend?');
     const cache = newCache();
-    await cache.record(computeFingerprints(field), 'education[0].institution');
+    await cache.record(computeFingerprints(field), 'education[0].institution', {
+      payloadDigest: conceptPayloadDigestFor(field),
+    });
 
     // Throws if reached. `resolveConcepts` returns a value rather than
     // rejecting, so an accidental call would surface as a failed test here.
@@ -198,7 +202,9 @@ describe('stage 1 - the cache', () => {
     const known = novel('Which campus did you attend?');
     const unknownQuestion = novel('What did you major in?');
     const cache = newCache();
-    await cache.record(computeFingerprints(known), 'education[0].institution');
+    await cache.record(computeFingerprints(known), 'education[0].institution', {
+      payloadDigest: conceptPayloadDigestFor(known),
+    });
 
     const port = new FakeSemanticPort();
     await resolveConcepts({ fields: queueOf(known, unknownQuestion), port, cache });

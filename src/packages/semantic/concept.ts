@@ -44,6 +44,7 @@ import { createLogger } from '@shared/logging';
 import type { AppError } from '@shared/errors';
 import { isProfilePath, type ProfilePath } from '@profile/paths';
 import { computeFingerprints, selectQuestionText } from '@form-engine/fingerprints/fingerprint';
+import { stableHashParts } from '@shared/ids';
 import {
   DEFAULT_CONFIDENCE_POLICY,
   type ConfidencePolicyConfig,
@@ -96,7 +97,13 @@ export async function resolveConcepts(input: ConceptStageInput): Promise<Concept
 
   for (const field of unmapped) {
     const fingerprints = computeFingerprints(field.descriptor);
-    const cached = await input.cache.lookup(fingerprints);
+    const question = toQuestion(field);
+    // The cache is keyed by the fingerprint and BOUND to the payload. The two
+    // are computed from the same material by different rules - the fingerprint
+    // hashes twelve sorted options, the payload sends sixty unsorted - so a
+    // page can share a key with somebody else's question while showing the
+    // model something entirely different. See the cache header.
+    const cached = await input.cache.lookup(fingerprints, conceptPayloadDigest(question));
 
     if (cached !== null) {
       // A cached null is an answer: this question has no path, and asking again
@@ -112,7 +119,7 @@ export async function resolveConcepts(input: ConceptStageInput): Promise<Concept
       continue;
     }
 
-    toAsk.push({ field, question: toQuestion(field) });
+    toAsk.push({ field, question });
   }
 
   if (toAsk.length === 0) return { resolutions, modelCalls: 0 };
@@ -141,14 +148,38 @@ export async function resolveConcepts(input: ConceptStageInput): Promise<Concept
     // because re-asking would produce the same unusable answer at the same
     // price.
     const label = question.question;
-    await input.cache.record(
-      computeFingerprints(field.descriptor),
-      path,
-      label.length > 0 ? { normalizedLabel: label } : {},
-    );
+    await input.cache.record(computeFingerprints(field.descriptor), path, {
+      ...(label.length > 0 ? { normalizedLabel: label } : {}),
+      // The question as it was actually asked, not as it was keyed.
+      payloadDigest: conceptPayloadDigest(question),
+    });
   }
 
   return { resolutions, modelCalls: 1 };
+}
+
+/**
+ * A hash of exactly what stage 1 sends about one field.
+ *
+ * Every string this stage hands to the port, in order, and nothing else.
+ *
+ * The transport truncates further (sixty options, four hundred characters a
+ * question) before anything crosses the wire, so this digest is STRICTER than
+ * the bytes that are actually sent: two fields whose payloads truncate to the
+ * same request may still hash differently. That direction costs a model call
+ * and is the safe one - the direction this exists to prevent is two different
+ * requests sharing one cached answer.
+ *
+ * `fieldId` is excluded on purpose: it is a per-scan local id that changes on
+ * every scan and means nothing to the model, so including it would make every
+ * lookup a miss and the cache pointless.
+ *
+ * Exported so a test can assert the property this exists for from outside:
+ * two fields that share a fingerprint but show the model different text must
+ * not share an answer.
+ */
+export function conceptPayloadDigest(question: ConceptQuestion): string {
+  return stableHashParts(['sc1', question.question, question.kind, ...question.options]);
 }
 
 /**
@@ -161,12 +192,27 @@ export async function resolveConcepts(input: ConceptStageInput): Promise<Concept
  * property a codebase can have.
  */
 function toQuestion(field: RefusedField): ConceptQuestion {
+  return { fieldId: field.fieldId, ...describeQuestion(field.descriptor) };
+}
+
+/**
+ * The three page-written things stage 1 may see, without the id.
+ *
+ * Split out so the digest can be computed from a descriptor alone - by a
+ * caller seeding the cache, or by a test asserting that two descriptors which
+ * share a fingerprint do NOT share a payload.
+ */
+function describeQuestion(descriptor: RefusedField['descriptor']): Omit<ConceptQuestion, 'fieldId'> {
   return {
-    fieldId: field.fieldId,
-    question: selectQuestionText(field.descriptor),
-    kind: field.descriptor.kind,
-    options: (field.descriptor.options ?? []).map((option) => option.label),
+    question: selectQuestionText(descriptor),
+    kind: descriptor.kind,
+    options: (descriptor.options ?? []).map((option) => option.label),
   };
+}
+
+/** The digest for a field, from the descriptor alone. */
+export function conceptPayloadDigestFor(descriptor: RefusedField['descriptor']): string {
+  return conceptPayloadDigest({ fieldId: '', ...describeQuestion(descriptor) });
 }
 
 /**

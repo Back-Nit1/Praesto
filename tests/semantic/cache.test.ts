@@ -31,23 +31,32 @@ const school = (overrides: Partial<FieldDescriptor> = {}): FieldDescriptor =>
     ...overrides,
   });
 
+/**
+ * A stand-in for "the payload this answer was given for".
+ *
+ * The cache does not compute the digest - the concept stage does, from what it
+ * hands the port - so these tests supply one the way the real caller would, and
+ * one test supplies a DIFFERENT one to prove the binding is enforced.
+ */
+const DIGEST = 'digest-school';
+
 describe('SemanticConceptCache', () => {
   it('returns a recorded concept for the same question', async () => {
     const cache = new SemanticConceptCache(new InMemoryStore());
     const field = school();
 
-    await cache.record(computeFingerprints(field), 'education[0].institution');
-    const hit = await cache.lookup(computeFingerprints(field));
+    await cache.record(computeFingerprints(field), 'education[0].institution', { payloadDigest: DIGEST });
+    const hit = await cache.lookup(computeFingerprints(field), DIGEST);
 
     expect(hit?.profilePath).toBe('education[0].institution');
   });
 
   it('misses for a question it has never seen', async () => {
     const cache = new SemanticConceptCache(new InMemoryStore());
-    await cache.record(computeFingerprints(school()), 'education[0].institution');
+    await cache.record(computeFingerprints(school()), 'education[0].institution', { payloadDigest: DIGEST });
 
     const other = school({ label: 'What is your expected salary?', options: [] });
-    expect(await cache.lookup(computeFingerprints(other))).toBeNull();
+    expect(await cache.lookup(computeFingerprints(other), DIGEST)).toBeNull();
   });
 
   it('hits on a different company, because a question means the same thing anywhere', async () => {
@@ -55,10 +64,10 @@ describe('SemanticConceptCache', () => {
     // concept keyed to the hostname it was learned on would re-ask on every new
     // employer, which is every application.
     const cache = new SemanticConceptCache(new InMemoryStore());
-    await cache.record(computeFingerprints(school({ hostname: 'boards.greenhouse.io', ats: 'greenhouse' })), 'education[0].institution');
+    await cache.record(computeFingerprints(school({ hostname: 'boards.greenhouse.io', ats: 'greenhouse' })), 'education[0].institution', { payloadDigest: DIGEST });
 
     const elsewhere = school({ hostname: 'jobs.lever.co', ats: 'lever' });
-    expect((await cache.lookup(computeFingerprints(elsewhere)))?.profilePath).toBe(
+    expect((await cache.lookup(computeFingerprints(elsewhere), DIGEST))?.profilePath).toBe(
       'education[0].institution',
     );
   });
@@ -70,8 +79,8 @@ describe('SemanticConceptCache', () => {
     const cache = new SemanticConceptCache(new InMemoryStore());
     const field = school({ label: 'How did you hear about this role?' });
 
-    await cache.record(computeFingerprints(field), null);
-    const hit = await cache.lookup(computeFingerprints(field));
+    await cache.record(computeFingerprints(field), null, { payloadDigest: DIGEST });
+    const hit = await cache.lookup(computeFingerprints(field), DIGEST);
 
     expect(hit).not.toBeNull();
     expect(hit?.profilePath).toBeNull();
@@ -92,7 +101,7 @@ describe('SemanticConceptCache', () => {
       },
     ]);
 
-    expect(await new SemanticConceptCache(store).lookup(computeFingerprints(field))).toBeNull();
+    expect(await new SemanticConceptCache(store).lookup(computeFingerprints(field), DIGEST)).toBeNull();
   });
 
   it('degrades to a miss when storage cannot be read, rather than failing the scan', async () => {
@@ -101,7 +110,9 @@ describe('SemanticConceptCache', () => {
       get: async () => err(new AppError('STORAGE_READ_FAILED', 'nope')),
     } as unknown as KeyValueStore;
 
-    expect(await new SemanticConceptCache(broken).lookup(computeFingerprints(school()))).toBeNull();
+    expect(
+      await new SemanticConceptCache(broken).lookup(computeFingerprints(school()), DIGEST),
+    ).toBeNull();
   });
 
   it('never grows without bound, and evicts the oldest entry first', async () => {
@@ -110,24 +121,24 @@ describe('SemanticConceptCache', () => {
 
     const fields = ['one', 'two', 'three', 'four'].map((word) => school({ label: `Question ${word}?` }));
     for (const field of fields) {
-      await cache.record(computeFingerprints(field), 'education[0].institution');
+      await cache.record(computeFingerprints(field), 'education[0].institution', { payloadDigest: DIGEST });
     }
 
     expect(await cache.size()).toBe(3);
     // The first question recorded is the one dropped.
-    expect(await cache.lookup(computeFingerprints(fields[0] as FieldDescriptor))).toBeNull();
-    expect(await cache.lookup(computeFingerprints(fields[3] as FieldDescriptor))).not.toBeNull();
+    expect(await cache.lookup(computeFingerprints(fields[0] as FieldDescriptor), DIGEST)).toBeNull();
+    expect(await cache.lookup(computeFingerprints(fields[3] as FieldDescriptor), DIGEST)).not.toBeNull();
   });
 
   it('overwrites rather than duplicating when the same question is recorded twice', async () => {
     const cache = new SemanticConceptCache(new InMemoryStore());
     const field = school();
 
-    await cache.record(computeFingerprints(field), 'education[0].institution');
-    await cache.record(computeFingerprints(field), 'education[0].fieldOfStudy');
+    await cache.record(computeFingerprints(field), 'education[0].institution', { payloadDigest: DIGEST });
+    await cache.record(computeFingerprints(field), 'education[0].fieldOfStudy', { payloadDigest: DIGEST });
 
     expect(await cache.size()).toBe(1);
-    expect((await cache.lookup(computeFingerprints(field)))?.profilePath).toBe(
+    expect((await cache.lookup(computeFingerprints(field), DIGEST))?.profilePath).toBe(
       'education[0].fieldOfStudy',
     );
   });

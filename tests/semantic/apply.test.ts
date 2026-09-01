@@ -11,6 +11,7 @@
  * So the entrypoint now calls this, the fixture test calls this, and the
  * ordering is asserted once, here.
  */
+import { conceptPayloadDigestFor } from '@semantic/concept';
 import { describe, expect, it } from 'vitest';
 import { applySemanticFallback, summariseRun } from '@semantic/apply';
 import { SemanticConceptCache } from '@semantic/cache';
@@ -81,7 +82,9 @@ describe('applySemanticFallback - what it changes', () => {
   it('marks a cache hit as previously_seen, which is the state the spec defines for it', async () => {
     const field = descriptor({ label: 'Which town do you live in?', kind: 'text' });
     const cache = newCache();
-    await cache.record(computeFingerprints(field), 'contact.city');
+    await cache.record(computeFingerprints(field), 'contact.city', {
+      payloadDigest: conceptPayloadDigestFor(field),
+    });
 
     const outcome = await run([refused(field)], new ForbiddenSemanticPort(), cache);
 

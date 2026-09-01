@@ -48,6 +48,24 @@
  *
  * NO NETWORK. This module imports no gateway and there is a test asserting it
  * never will.
+ *
+ * AN ANSWER IS BOUND TO THE QUESTION THAT WAS ACTUALLY ASKED
+ * The fingerprint and the payload sent to the model are computed from the same
+ * material but not by the same rules: the fingerprint hashes the first twelve
+ * options, sorted; the request sends up to sixty, unsorted. So two fields can
+ * share a fingerprint and put DIFFERENT text in front of the model - and since
+ * this cache is global by design, one of those two fields can be on a page
+ * written by somebody who would like to choose what the other one is told.
+ *
+ * That is a cross-site cache-poisoning route: craft a control whose first
+ * twelve sorted options match a common real question, put whatever you like in
+ * the rest, and the answer the model gives about YOUR question is the answer
+ * this extension reuses on somebody else's form.
+ *
+ * So every entry also carries `payloadDigest` - a hash of the question, kind and
+ * option labels handed to the port - and a lookup whose digest does not match is
+ * a MISS. The cost of a mismatch is one model call. The cost of ignoring it is a
+ * suggestion chosen by a third party.
  */
 import { AppError } from '@shared/errors';
 import { createLogger } from '@shared/logging';
@@ -87,6 +105,14 @@ export interface CachedConcept {
   readonly profilePath: ProfilePath | null;
   /** The question as a human would read it. For the settings screen only. */
   readonly normalizedLabel?: string;
+  /**
+   * Hash of the exact payload this answer was given for.
+   *
+   * Absent on entries written before this existed. Those are treated as misses
+   * rather than trusted: what they were asked cannot be reconstructed, and the
+   * price of finding out again is one model call, once.
+   */
+  readonly payloadDigest?: string;
   readonly createdAt: string;
 }
 
@@ -115,7 +141,10 @@ export class SemanticConceptCache {
    * because a cache could not be read would turn a small problem into a broken
    * page - the same reasoning as `LearnedMappingStore.index()`.
    */
-  async lookup(fingerprints: FieldFingerprints): Promise<CachedConcept | null> {
+  async lookup(
+    fingerprints: FieldFingerprints,
+    payloadDigest: string,
+  ): Promise<CachedConcept | null> {
     const entries = await this.load();
 
     for (const scope of SCOPE_PRECEDENCE) {
@@ -123,7 +152,16 @@ export class SemanticConceptCache {
       const match = entries.find(
         (entry) => entry.scope === scope && entry.fingerprint === fingerprint,
       );
-      if (match !== undefined) return match;
+      if (match === undefined) continue;
+
+      // The fingerprint says "the same question"; the digest says "the same
+      // question, asked the same way". Only the second is a safe basis for
+      // reusing an answer across sites - see the header.
+      if (match.payloadDigest !== payloadDigest) {
+        log.debugLazy(() => ['Cached concept ignored: it answered a different payload']);
+        return null;
+      }
+      return match;
     }
     return null;
   }
@@ -137,7 +175,7 @@ export class SemanticConceptCache {
   async record(
     fingerprints: FieldFingerprints,
     profilePath: ProfilePath | null,
-    details: { normalizedLabel?: string } = {},
+    details: { normalizedLabel?: string; payloadDigest: string },
   ): Promise<Result<void, AppError>> {
     const entries = await this.load();
     const fingerprint = fingerprints.global;
@@ -149,6 +187,10 @@ export class SemanticConceptCache {
       ...(details.normalizedLabel !== undefined
         ? { normalizedLabel: details.normalizedLabel }
         : {}),
+      // Required, not optional, at the write site: an answer recorded without
+      // the question it answered can never be safely reused, and making the
+      // caller pass it means a new call site cannot forget.
+      payloadDigest: details.payloadDigest,
       createdAt: this.now().toISOString(),
     };
 
@@ -244,6 +286,12 @@ function isValidEntry(value: unknown): value is CachedConcept {
   ) {
     return false;
   }
+
+  // A digest, when present, must be a plain string. An entry with a
+  // non-string digest is a hand-edited or corrupted row; dropping it costs one
+  // model call and removes the only way a stored value could confuse the
+  // comparison below.
+  if (entry.payloadDigest !== undefined && typeof entry.payloadDigest !== 'string') return false;
 
   // The important one. `null` is valid and meaningful; a string that is no
   // longer a path we have is not.
