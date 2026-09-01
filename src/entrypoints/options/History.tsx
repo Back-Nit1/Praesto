@@ -236,7 +236,7 @@ function FieldRow({ field }: { field: FillAuditRecord }): ReactNode {
           {field.mappedProfilePath === undefined
             ? 'Not recognised'
             : `${labelForPath(field.mappedProfilePath)} · ${describeSource(field)}`}
-          {field.userCorrected && ' · you corrected this'}
+          {field.outcome !== 'unreviewed' && ' · you corrected this'}
         </div>
       </div>
 

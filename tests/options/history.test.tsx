@@ -25,7 +25,7 @@ function row(overrides: Partial<FillAuditRecord> & { id: string; runId: string }
     decidedAction: 'fill',
     fillAttempted: true,
     fillVerified: true,
-    userCorrected: false,
+    outcome: 'unreviewed',
     ...overrides,
   };
 }

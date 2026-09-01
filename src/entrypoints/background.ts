@@ -396,7 +396,12 @@ export default defineBackground(() => {
         // the history should not go on showing those fills as unremarkable
         // successes. Keyed by the `exact` fingerprint, the same one the row
         // was written with.
-        const marked = await auditHistory.markCorrected(fingerprints.exact);
+        // What the correction MEANT is derived per row from what the policy had
+        // decided about it: correcting a field we filled is a wrong fill;
+        // correcting one we refused is the learning loop working. The path is
+        // passed because `null` - "this field means nothing" - is a third case
+        // again. See `deriveCorrectionOutcome`.
+        const marked = await auditHistory.recordOutcome(fingerprints.exact, request.profilePath);
         if (!marked.ok) log.warn('Could not mark history rows corrected', marked.error.code);
 
         log.info(`Correction stored: ${request.profilePath ?? 'none'} at scope ${request.scope}`);

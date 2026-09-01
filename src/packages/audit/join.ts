@@ -51,7 +51,10 @@ export function buildAuditRecords(
   const timestamp = now.toISOString();
 
   const rows = run.fields.map((field) => {
-    const outcome = byLocalId.get(field.localId);
+    // Named `reported` rather than `outcome`: the row now has an `outcome`
+    // field, and it means something entirely different - the USER's verdict,
+    // not the page's report.
+    const reported = byLocalId.get(field.localId);
     byLocalId.delete(field.localId);
 
     return {
@@ -73,12 +76,13 @@ export function buildAuditRecords(
       // engine - the user filled the safe fields and left this suggestion
       // alone. That is a real outcome and it is recorded as itself, not as a
       // failure.
-      fillAttempted: outcome?.attempted ?? false,
-      fillVerified: outcome?.verified ?? false,
-      // Set later, by a correction. Nothing at fill time can know it.
-      userCorrected: false,
-      ...(outcome?.adapter !== undefined ? { adapter: outcome.adapter } : {}),
-      ...(outcome?.failureReason !== undefined ? { failureReason: outcome.failureReason } : {}),
+      fillAttempted: reported?.attempted ?? false,
+      fillVerified: reported?.verified ?? false,
+      // No verdict yet, and `unreviewed` does not mean "correct" - nothing at
+      // fill time can know whether this was right. Only the user can say.
+      outcome: 'unreviewed' as const,
+      ...(reported?.adapter !== undefined ? { adapter: reported.adapter } : {}),
+      ...(reported?.failureReason !== undefined ? { failureReason: reported.failureReason } : {}),
     } satisfies FillAuditRecord;
   });
 
@@ -124,7 +128,7 @@ export function buildUnmatchedRecords(
     decidedAction: result.attempted ? ('fill' as const) : ('skip' as const),
     fillAttempted: result.attempted,
     fillVerified: result.verified,
-    userCorrected: false,
+    outcome: 'unreviewed' as const,
     ...(result.adapter !== undefined ? { adapter: result.adapter } : {}),
     ...(result.failureReason !== undefined ? { failureReason: result.failureReason } : {}),
   }));

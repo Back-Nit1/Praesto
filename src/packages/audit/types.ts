@@ -29,6 +29,68 @@ import type { ATSKind } from '@ats/types';
 import type { MappingSource } from '@form-engine/mapper/types';
 
 /**
+ * What the user's action said about this row's decision.
+ * ---------------------------------------------------------------------------
+ * This replaces a `userCorrected: boolean`, which could not tell two opposite
+ * events apart:
+ *
+ *   we filled a field wrongly and the user fixed it      <- the failure the
+ *                                                           product exists to
+ *                                                           avoid
+ *   we correctly refused a field and the user taught us   <- the learning loop
+ *                                                           working as designed
+ *
+ * Counting the second as an incorrect fill is why the most important metric in
+ * spec section 26 could not be computed from this table. It also matters which
+ * way each one moves: a correction on a refused field lowers the UNKNOWN-field
+ * rate; only a correction on something we WROTE raises the incorrect-fill rate.
+ *
+ * `unreviewed` is the default and it is not a synonym for "correct". Most
+ * fields are never corrected, and silence is not evidence - see metrics.ts.
+ */
+export type FieldOutcome =
+  /** Default. Nobody said anything about this row. NOT "correct". */
+  | 'unreviewed'
+  /** The user read a suggestion and accepted it. The only positive evidence. */
+  | 'accepted_suggestion'
+  /** We wrote a value; the user changed what the field means. */
+  | 'corrected_wrong_fill'
+  /** We offered a value; the user changed it before accepting. */
+  | 'corrected_wrong_suggestion'
+  /** We refused the field; the user taught us what it is. */
+  | 'assigned_unmapped'
+  /** We touched a field that should have been left alone. */
+  | 'rejected_to_none'
+  /** Pre-split `userCorrected: true`. Counted in nothing. See metrics.ts. */
+  | 'corrected_legacy';
+
+/**
+ * The outcome a correction implies for a row that already exists.
+ *
+ * Pure, and exported, so the classification can be tested without a database:
+ * everything it needs is what the POLICY decided (`decidedAction`) and what the
+ * USER said (`profilePath`, where `null` means "this field means nothing").
+ *
+ * `attach_resume` is folded in with `fill` deliberately. Attaching a document
+ * to a field that wanted something else is a wrong fill by any reading, and
+ * giving it its own outcome would add a case to every numerator for no gain.
+ */
+export function deriveCorrectionOutcome(
+  decidedAction: FillAuditRecord['decidedAction'],
+  profilePath: string | null,
+): FieldOutcome {
+  // We had already decided to leave this field alone, and the user is telling
+  // us what it means. That is the loop working - never an incorrect fill.
+  if (decidedAction === 'skip') return 'assigned_unmapped';
+
+  // "This field means nothing." We acted on something we should not have
+  // touched, whether we wrote it or merely offered it.
+  if (profilePath === null) return 'rejected_to_none';
+
+  return decidedAction === 'suggest' ? 'corrected_wrong_suggestion' : 'corrected_wrong_fill';
+}
+
+/**
  * One field, one fill run.
  *
  * `id` is `${runId}:${localId}` rather than a random id, which makes the write
@@ -65,7 +127,16 @@ export interface FillAuditRecord {
   fillAttempted: boolean;
   /** True ONLY when the page read the value back. Never "we sent it". */
   fillVerified: boolean;
-  userCorrected: boolean;
+  /** What the user's action said about this decision. Default `unreviewed`. */
+  outcome: FieldOutcome;
+  /**
+   * This row shares a fingerprint with a later row the same correction hit.
+   *
+   * It keeps its outcome so history still shows it as corrected - the mapping
+   * WAS wrong here too - but metrics skip it on both sides of every rate. One
+   * correction is one piece of evidence, not one per run it happened to touch.
+   */
+  supersededByLaterCorrection?: boolean;
   adapter?: string;
   /** A failure CODE from the fill engine, never the value that failed. */
   failureReason?: string;
@@ -136,7 +207,11 @@ function countRun(fields: readonly FillAuditRecord[]): RunCounts {
   let corrected = 0;
 
   for (const field of fields) {
-    if (field.userCorrected) corrected++;
+    // Any verdict at all, including the pre-split legacy one. The history view
+    // says "corrected" and means "the user touched this", which is exactly the
+    // set of outcomes that are not `unreviewed`. Metrics, which need the
+    // distinctions this count throws away, do not use it.
+    if (field.outcome !== 'unreviewed') corrected++;
     if (!field.fillAttempted) {
       skipped++;
       continue;

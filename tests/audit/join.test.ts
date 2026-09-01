@@ -135,10 +135,11 @@ describe('redaction', () => {
     'mappedProfilePath',
     'mappingConfidence',
     'mappingSource',
+    'outcome',
     'pageUrl',
     'runId',
+    'supersededByLaterCorrection',
     'timestamp',
-    'userCorrected',
   ];
 
   it('never writes a key outside the agreed set', () => {

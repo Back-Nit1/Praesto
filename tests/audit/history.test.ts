@@ -16,7 +16,7 @@ function row(overrides: Partial<FillAuditRecord> & { id: string; runId: string }
     decidedAction: 'fill',
     fillAttempted: true,
     fillVerified: true,
-    userCorrected: false,
+    outcome: 'unreviewed',
     ...overrides,
   };
 }
@@ -38,7 +38,7 @@ describe('groupIntoRuns', () => {
       row({ id: 'r:1', runId: 'r' }),
       row({ id: 'r:2', runId: 'r', fillVerified: false }),
       row({ id: 'r:3', runId: 'r', fillAttempted: false, fillVerified: false, decidedAction: 'skip' }),
-      row({ id: 'r:4', runId: 'r', userCorrected: true }),
+      row({ id: 'r:4', runId: 'r', outcome: 'corrected_wrong_fill' }),
     ]);
 
     expect(runs[0]?.counts).toEqual({

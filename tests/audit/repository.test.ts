@@ -17,7 +17,7 @@ function row(overrides: Partial<FillAuditRecord> & { id: string; runId: string }
     decidedAction: 'fill',
     fillAttempted: true,
     fillVerified: true,
-    userCorrected: false,
+    outcome: 'unreviewed',
     ...overrides,
   };
 }
@@ -56,23 +56,80 @@ describe('AuditRepository', () => {
       row({ id: 'r2:b', runId: 'r2', fieldFingerprint: 'fp-other' }),
     ]);
 
-    const marked = await repo.markCorrected('fp-target');
+    const marked = await repo.recordOutcome('fp-target', 'contact.email');
 
     expect(marked.ok && marked.value).toBe(2);
     const runs = await repo.recentRuns();
     const corrected = runs.ok
-      ? runs.value.flatMap((run) => run.fields).filter((field) => field.userCorrected)
+      ? runs.value.flatMap((run) => run.fields).filter((field) => field.outcome !== 'unreviewed')
       : [];
     expect(corrected.map((field) => field.id).sort()).toEqual(['r1:a', 'r2:a']);
   });
 
-  it('does not rewrite rows that are already marked corrected', async () => {
+  it('derives the outcome per row from what the policy had decided about it', async () => {
     const repo = new AuditRepository(new InMemoryAuditCollection());
-    await repo.record([row({ id: 'r1:a', runId: 'r1', userCorrected: true })]);
+    await repo.record([
+      row({ id: 'r1:filled', runId: 'r1', fieldFingerprint: 'fp-x', decidedAction: 'fill' }),
+    ]);
+    await repo.record([
+      row({
+        id: 'r1:refused',
+        runId: 'r1',
+        fieldFingerprint: 'fp-y',
+        decidedAction: 'skip',
+        fillAttempted: false,
+        fillVerified: false,
+      }),
+    ]);
 
-    const marked = await repo.markCorrected('fp-a');
+    await repo.recordOutcome('fp-x', 'contact.email');
+    await repo.recordOutcome('fp-y', 'contact.email');
 
-    expect(marked.ok && marked.value).toBe(0);
+    const runs = await repo.recentRuns();
+    const byId = new Map(
+      (runs.ok ? runs.value.flatMap((run) => run.fields) : []).map((field) => [
+        field.id,
+        field.outcome,
+      ]),
+    );
+    expect(byId.get('r1:filled')).toBe('corrected_wrong_fill');
+    expect(byId.get('r1:refused')).toBe('assigned_unmapped');
+  });
+
+  it('one correction on a repeated question is attributed to one run, not to each', async () => {
+    const repo = new AuditRepository(new InMemoryAuditCollection());
+    await repo.record([
+      row({ id: 'r1:a', runId: 'r1', fieldFingerprint: 'fp-x', timestamp: '2026-08-29T10:00:00.000Z' }),
+      row({ id: 'r2:a', runId: 'r2', fieldFingerprint: 'fp-x', timestamp: '2026-08-30T10:00:00.000Z' }),
+      row({ id: 'r3:a', runId: 'r3', fieldFingerprint: 'fp-x', timestamp: '2026-08-31T10:00:00.000Z' }),
+    ]);
+
+    await repo.recordOutcome('fp-x', null);
+
+    const runs = await repo.recentRuns();
+    const fields = runs.ok ? runs.value.flatMap((run) => run.fields) : [];
+
+    // Every row still READS as corrected - the mapping was wrong each time it
+    // was used - but only the newest carries the evidence a metric may count.
+    expect(fields.every((field) => field.outcome === 'rejected_to_none')).toBe(true);
+    expect(fields.filter((field) => field.supersededByLaterCorrection !== true)).toHaveLength(1);
+    expect(fields.find((field) => field.supersededByLaterCorrection !== true)?.id).toBe('r3:a');
+  });
+
+  it('reads a pre-split row as corrected_legacy rather than guessing what it meant', async () => {
+    const collection = new InMemoryAuditCollection();
+    const repo = new AuditRepository(collection);
+
+    // A row as written before the outcome split existed. Cast because the type
+    // no longer admits it - which is the point: only old STORAGE has this shape.
+    const { outcome: _dropped, ...legacy } = row({ id: 'r1:a', runId: 'r1' });
+    await collection.putMany([{ ...legacy, userCorrected: true } as unknown as FillAuditRecord]);
+
+    const runs = await repo.recentRuns();
+    const field = runs.ok ? runs.value[0]?.fields[0] : undefined;
+
+    expect(field?.outcome).toBe('corrected_legacy');
+    expect(field).not.toHaveProperty('userCorrected');
   });
 
   it('prunes to the retention policy and reports the number dropped', async () => {

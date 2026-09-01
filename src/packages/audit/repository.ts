@@ -25,7 +25,13 @@
 import { AppError } from '@shared/errors';
 import { ok, type Result } from '@shared/result';
 import { AUDIT_TIMESTAMP_INDEX, IndexedDbCollection, STORES } from '@storage/indexed-db';
-import { groupIntoRuns, type ApplicationRun, type FillAuditRecord } from './types';
+import {
+  deriveCorrectionOutcome,
+  groupIntoRuns,
+  type ApplicationRun,
+  type FieldOutcome,
+  type FillAuditRecord,
+} from './types';
 import { DEFAULT_RETENTION, planPrune, type RetentionEntry, type RetentionPolicy } from './retention';
 
 /**
@@ -94,32 +100,54 @@ export class AuditRepository {
   /** The history view: runs, newest first. */
   async recentRuns(limit = HISTORY_READ_LIMIT): Promise<Result<ApplicationRun[], AppError>> {
     const rows = await this.collection.listByIndex(AUDIT_TIMESTAMP_INDEX, limit);
-    return rows.ok ? ok(groupIntoRuns(rows.value)) : rows;
+    return rows.ok ? ok(groupIntoRuns(rows.value.map(normaliseOutcome))) : rows;
   }
 
   /**
-   * Mark every recent row for a field as user-corrected.
+   * Record what a correction said about every recent row for a field.
    *
    * By fingerprint rather than by row id because a correction arrives from the
    * side panel, which knows the field but not which history row it produced -
    * and the same question genuinely can appear in more than one recent run
    * (the user reloaded the form, or applied to two roles at the same company).
-   * Marking all of them is right: the correction says that mapping was wrong,
-   * and it was wrong every time it was used.
+   * Marking all of them is right FOR HISTORY: the correction says that mapping
+   * was wrong, and it was wrong every time it was used.
+   *
+   * IT IS NOT RIGHT FOR METRICS, which is why supersession exists.
+   * One correction is one piece of evidence. Counted once per row, a user who
+   * applies to four roles at the same company would push the incorrect-fill
+   * rate up four times for one mistake - so the rate would measure how often
+   * they reuse a careers site, not how often we are wrong. The newest matching
+   * row carries the verdict; the older ones keep the outcome for DISPLAY and
+   * are flagged `supersededByLaterCorrection`, which metrics.ts drops from both
+   * the numerator and the denominator.
+   *
+   * The outcome itself is DERIVED per row rather than passed in: only the row
+   * knows what the policy decided about it, and a correction on a field we
+   * refused means something opposite to a correction on a field we filled.
    *
    * Bounded to the rows a history view would show. A correction should not walk
    * the whole store.
    */
-  async markCorrected(
+  async recordOutcome(
     fieldFingerprint: string,
+    profilePath: string | null,
     limit = 500,
   ): Promise<Result<number, AppError>> {
     const rows = await this.collection.listByIndex(AUDIT_TIMESTAMP_INDEX, limit);
     if (!rows.ok) return rows;
 
-    const updated = rows.value
-      .filter((row) => row.fieldFingerprint === fieldFingerprint && !row.userCorrected)
-      .map((row) => ({ ...row, userCorrected: true }));
+    // `listByIndex` is newest first, so the first match is the run the user was
+    // actually looking at when they corrected it.
+    const matching = rows.value
+      .map(normaliseOutcome)
+      .filter((row) => row.fieldFingerprint === fieldFingerprint);
+
+    const updated = matching.map((row, index) => ({
+      ...row,
+      outcome: deriveCorrectionOutcome(row.decidedAction, profilePath),
+      ...(index === 0 ? {} : { supersededByLaterCorrection: true }),
+    }));
 
     if (updated.length === 0) return ok(0);
 
@@ -131,6 +159,31 @@ export class AuditRepository {
   async clear(): Promise<Result<void, AppError>> {
     return this.collection.clear();
   }
+}
+
+/**
+ * Give a row written before the outcome split something an outcome-shaped
+ * reader can use.
+ *
+ * These rows live in IndexedDB, which `runMigrations` does not walk, so they
+ * are normalised on the way out instead of being rewritten in place.
+ *
+ * A pre-split `userCorrected: true` becomes `corrected_legacy` and NOT one of
+ * the real outcomes. The boolean genuinely did not record which of them
+ * happened, and picking the most likely one would fabricate exactly the data
+ * this split exists to make trustworthy: `corrected_legacy` is counted in no
+ * numerator and excluded from every denominator. `false` becomes `unreviewed`,
+ * which is the same claim the boolean was making - nobody said anything.
+ */
+function normaliseOutcome(row: FillAuditRecord): FillAuditRecord {
+  if (row.outcome !== undefined) return row;
+
+  const legacy = (row as { userCorrected?: boolean }).userCorrected === true;
+  const outcome: FieldOutcome = legacy ? 'corrected_legacy' : 'unreviewed';
+  const { userCorrected: _dropped, ...rest } = row as FillAuditRecord & {
+    userCorrected?: boolean;
+  };
+  return { ...rest, outcome };
 }
 
 /**
