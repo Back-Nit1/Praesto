@@ -7,7 +7,7 @@
  *               spec section 22's instruction not to bury the user in mapping
  *               metadata during an actual application.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { BrandMark, Button, StatusLine } from '@/components/ui';
 import { useProfile } from '@/hooks/use-profile';
 import { ProfileEditor } from './ProfileEditor';
@@ -15,8 +15,19 @@ import { MappingPlayground } from './MappingPlayground';
 import { LearnedRules } from './LearnedRules';
 import { ResumeImport } from './ResumeImport';
 import { History } from './History';
+import { Metrics } from './Metrics';
+import { SettingsRepository } from '@storage/settings';
 
-type Tab = 'profile' | 'resume' | 'history' | 'learned' | 'playground';
+type Tab = 'profile' | 'resume' | 'history' | 'learned' | 'playground' | 'metrics';
+
+/**
+ * Constructed once at module scope; holds a reference, no data.
+ *
+ * Same pattern as `useProfile`. An extension page runs on the extension origin
+ * and may reach its own storage directly - see that hook's header for why the
+ * data-minimisation rule is about content scripts specifically.
+ */
+const settings = new SettingsRepository();
 
 const TAB_LABELS: Record<Tab, string> = {
   profile: 'Profile',
@@ -24,6 +35,7 @@ const TAB_LABELS: Record<Tab, string> = {
   history: 'History',
   learned: 'Learned rules',
   playground: 'Mapping playground',
+  metrics: 'Metrics',
 };
 
 /**
@@ -61,12 +73,35 @@ const TAB_META: Record<Tab, { title: string; description: string }> = {
     description:
       'Type in a label and a control type to see what the extension would make of it, and why. Nothing here touches a real application.',
   },
+  metrics: {
+    title: 'Metrics',
+    description:
+      'How often the extension is wrong, measured only where you have told it. Computed from your own history on this machine, and shown as a rate with the evidence it rests on rather than as a bare number.',
+  },
 };
 
 export function App(): ReactNode {
   const { profile, loading, error, edit, save, reload, exportJson, importJson, dirty } =
     useProfile();
   const [tab, setTab] = useState<Tab>('profile');
+  const [developerMode, setDeveloperMode] = useState(false);
+
+  // Read once on mount. Off until storage says otherwise, so a failed read
+  // leaves the development surfaces hidden rather than exposed.
+  useEffect(() => {
+    void settings.get().then((result) => {
+      if (result.ok) setDeveloperMode(result.value.developerMode);
+    });
+  }, []);
+
+  async function handleDeveloperMode(enabled: boolean): Promise<void> {
+    setDeveloperMode(enabled);
+    // Leaving the screen when the toggle goes off, rather than rendering a tab
+    // that is no longer in the nav.
+    if (!enabled && tab === 'metrics') setTab('profile');
+    const written = await settings.setDeveloperMode(enabled);
+    if (!written.ok) setStatus({ kind: 'error', message: 'Could not save that setting' });
+  }
   const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'error'; message?: string }>({
     kind: 'idle',
   });
@@ -167,7 +202,7 @@ export function App(): ReactNode {
           </div>
 
           <nav className="space-y-1" aria-label="Workspace">
-            {(['profile', 'resume', 'history', 'learned', 'playground'] as const).map((candidate) => {
+            {tabsFor(developerMode).map((candidate) => {
               const selected = tab === candidate;
               return (
                 <button
@@ -188,11 +223,25 @@ export function App(): ReactNode {
             })}
           </nav>
 
+          {/* OFF by default, and the metrics screen does not exist in the nav
+              until it is on. Spec section 22 asks for debug detail to live
+              behind a toggle; section 26 is explicit that those numbers are for
+              development, and a number on an applicant's screen is a number
+              somebody starts optimising. */}
+          <label className="mt-auto flex cursor-pointer items-center gap-2.5 border-t border-[var(--rule)] pt-4 text-[11.5px] text-[var(--ink-2)]">
+            <input
+              type="checkbox"
+              checked={developerMode}
+              onChange={(event) => void handleDeveloperMode(event.target.checked)}
+            />
+            Developer mode
+          </label>
+
           {/* Stated once, quietly, at the bottom of the sidebar. It is the
               single most load-bearing fact about the product and it does not
               need a coloured card to earn attention - it needs to still be
               true, and to be findable when someone wonders. */}
-          <p className="mt-auto border-t border-[var(--rule)] pt-4 text-[11px] leading-relaxed text-[var(--ink-2)]">
+          <p className="mt-3 text-[11px] leading-relaxed text-[var(--ink-2)]">
             Your profile and your resume are stored in this browser only. The extension makes no
             network requests and has no server to send them to.
           </p>
@@ -255,12 +304,25 @@ export function App(): ReactNode {
               {tab === 'history' && <History />}
               {tab === 'learned' && <LearnedRules />}
               {tab === 'playground' && <MappingPlayground profile={profile} />}
+              {tab === 'metrics' && developerMode && <Metrics />}
             </div>
           </div>
         </main>
       </div>
     </div>
   );
+}
+
+/**
+ * The nav, which is where the developer toggle actually takes effect.
+ *
+ * Metrics is absent from this list rather than disabled in it. A greyed-out tab
+ * advertises a screen; the point of the toggle is that an applicant filling in
+ * their address never learns there is a development surface to go looking for.
+ */
+function tabsFor(developerMode: boolean): readonly Tab[] {
+  const base = ['profile', 'resume', 'history', 'learned', 'playground'] as const;
+  return developerMode ? [...base, 'metrics'] : base;
 }
 
 function NavIcon({ tab, active }: { tab: Tab; active: boolean }): ReactNode {
@@ -270,6 +332,7 @@ function NavIcon({ tab, active }: { tab: Tab; active: boolean }): ReactNode {
     history: <><path d="M4 12a8 8 0 1 0 2.5-5.8M4 5.5V10h4.5" /><path d="M12 8v4.5l3 1.8" /></>,
     learned: <><path d="M12 3.5a6 6 0 0 0-3.8 10.6c.8.7 1.3 1.5 1.3 2.4h5c0-.9.5-1.7 1.3-2.4A6 6 0 0 0 12 3.5Z" /><path d="M9.7 20h4.6M10 17h4" /></>,
     playground: <><path d="m8 3 1.2 3.2L12.5 7.5 9.2 8.8 8 12 6.8 8.8 3.5 7.5l3.3-1.3z" /><path d="m16.5 11 1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z" /></>,
+    metrics: <><path d="M4 20V10M10 20V4M16 20v-7M20.5 20H3.5" /></>,
   };
   return (
     <svg
