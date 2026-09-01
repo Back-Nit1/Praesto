@@ -155,6 +155,21 @@ export interface ScanOptions {
   /** Root to scan. Defaults to the whole document; a MutationObserver rescan
    *  passes the changed subtree so we do not reprocess the page. */
   root?: ParentNode;
+  /**
+   * Several subtrees, scanned as one pass. Overrides `root` when present.
+   *
+   * A conditional question rarely appears in one place: answering "yes" to
+   * sponsorship can reveal a block here and enable a field there, and each
+   * arrives as its own mutation. Scanning them together produces ONE scan -
+   * one page context, one truncation decision, one set of ids - where scanning
+   * them one at a time would produce three partial scans the panel would then
+   * have to reconcile.
+   *
+   * A root that is itself a form control is included, which `querySelectorAll`
+   * alone would miss: a page that appends a bare `<input>` produces a mutation
+   * whose added node IS the field.
+   */
+  roots?: readonly ParentNode[];
   /** Overrides the runtime budget. Tests only. */
   maxFields?: number;
 }
@@ -192,9 +207,9 @@ export async function scanPage(document: Document, options: ScanOptions): Promis
   const startedAt = performance.now();
   const budget = getRuntimeBudget();
   const maxFields = options.maxFields ?? budget.maxFieldsPerScan;
-  const root = options.root ?? document;
+  const roots = options.roots ?? [options.root ?? document];
 
-  const elements = [...root.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR)];
+  const elements = collectCandidates(roots);
   const fields: FieldDescriptor[] = [];
   const elementsById = new Map<string, HTMLElement>();
   let truncated = false;
@@ -413,6 +428,35 @@ function classifyControl(element: HTMLElement, tag: string, type?: string): Cont
     default:
       return element.isContentEditable ? 'textarea' : 'unsupported';
   }
+}
+
+/**
+ * Every candidate control under the given roots, in document order, once each.
+ *
+ * Deduplicated because subtrees overlap: two mutations inside the same
+ * container yield two roots, one of which may contain the other, and a control
+ * described twice would become two panel rows for one question.
+ *
+ * `compareDocumentPosition` restores document order across roots, so the field
+ * list reads in the order the user sees the form regardless of the order the
+ * mutations arrived in.
+ */
+function collectCandidates(roots: readonly ParentNode[]): HTMLElement[] {
+  const seen = new Set<HTMLElement>();
+
+  for (const root of roots) {
+    // A root that is itself a control: `querySelectorAll` searches DESCENDANTS
+    // only, so an appended bare input would otherwise never be described.
+    if (root instanceof HTMLElement && root.matches(CANDIDATE_SELECTOR)) seen.add(root);
+    for (const element of root.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR)) seen.add(element);
+  }
+
+  if (roots.length === 1) return [...seen];
+
+  return [...seen].sort((a, b) =>
+    // eslint-disable-next-line no-bitwise -- the DOM API is a bitmask
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+  );
 }
 
 /**

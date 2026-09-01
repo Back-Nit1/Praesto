@@ -169,6 +169,89 @@ async function scanWith(
   await screen.findByText(/fields detected/i);
 }
 
+describe('side panel - a form that changes underneath the user', () => {
+  it('adds newly revealed questions without losing the fills already done', async () => {
+    await scanWith([action({ localId: 'f_1' })]);
+
+    reply('CONTENT_FILL', {
+      ok: true,
+      outcomes: [{ localId: 'f_1', attempted: true, verified: true, adapter: 'NativeText' }],
+    });
+    click(/fill 1 safe field/i);
+    await screen.findByText(/1 field filled and verified/i);
+
+    // The page reveals a conditional question.
+    broadcast({ type: 'PAGE_FIELDS_CHANGED' }, 7);
+    await screen.findByText(/this form changed/i);
+
+    reply('CONTENT_SCAN', {
+      ok: true,
+      incremental: true,
+      fieldsDetected: 1,
+      actions: [
+        action({
+          localId: 'f_2',
+          action: 'skip',
+          profilePath: null,
+          value: undefined,
+          knowledgeState: 'unknown',
+          explanation: 'Not recognised',
+        }),
+      ],
+    });
+    click(/check for new questions/i);
+
+    // Both fields are now listed...
+    await waitFor(() => expect(screen.getByText(/2 fields detected/i)).toBeTruthy());
+    // ...and the fill that already happened is still counted as verified,
+    // rather than the panel forgetting it to fetch one new row. The ledger
+    // draws a bucket only when it has something in it.
+    expect(screen.getByText('Filled and verified')).toBeTruthy();
+  });
+
+  it('asks the page for an incremental scan, and the plain rescan for a full one', async () => {
+    await scanWith([action({ localId: 'f_1' })]);
+
+    broadcast({ type: 'PAGE_FIELDS_CHANGED' }, 7);
+    await screen.findByText(/this form changed/i);
+
+    reply('CONTENT_SCAN', { ok: true, incremental: true, fieldsDetected: 0, actions: [] });
+    click(/check for new questions/i);
+
+    await waitFor(() => {
+      const scans = sent.filter((entry) => entry.message['type'] === 'CONTENT_SCAN');
+      expect(scans[scans.length - 1]?.message['incremental']).toBe(true);
+    });
+
+    reply('CONTENT_SCAN', { ok: true, fieldsDetected: 1, actions: [action({ localId: 'f_1' })] });
+    click(/^rescan$/i);
+
+    await waitFor(() => {
+      const scans = sent.filter((entry) => entry.message['type'] === 'CONTENT_SCAN');
+      expect(scans[scans.length - 1]?.message['incremental']).toBeUndefined();
+    });
+  });
+
+  it('replaces the list when the page could not give an incremental answer', async () => {
+    // The page decides. A frame that has lost track of what changed answers
+    // with a full list and no flag, and the panel must not append it to what it
+    // already has - that is how one question becomes two rows.
+    await scanWith([action({ localId: 'f_1' })]);
+
+    broadcast({ type: 'PAGE_FIELDS_CHANGED' }, 7);
+    await screen.findByText(/this form changed/i);
+
+    reply('CONTENT_SCAN', {
+      ok: true,
+      fieldsDetected: 1,
+      actions: [action({ localId: 'f_1' })],
+    });
+    click(/check for new questions/i);
+
+    await waitFor(() => expect(screen.getByText(/1 fields? detected/i)).toBeTruthy());
+  });
+});
+
 describe('side panel - required fields still blank', () => {
   it('names a required field it did not understand, instead of burying it in "Left blank"', async () => {
     await scanWith([

@@ -486,10 +486,22 @@ export function App(): ReactNode {
     [],
   );
 
-  const handleScan = useCallback(async (): Promise<void> => {
+  /**
+   * Scan the page and show what the worker made of it.
+   *
+   * `incremental` asks each frame to look only at what changed since its last
+   * scan. The page decides whether it can honour that; a frame that has lost
+   * track answers with a full list and says so, and the merge below reads the
+   * ANSWER rather than the request - so a partial merge can never be built on a
+   * frame that actually replaced its list.
+   */
+  const handleScan = useCallback(async (options: { incremental?: boolean } = {}): Promise<void> => {
     setBusy(true);
     setStatus({ kind: 'idle' });
-    setState({ kind: 'scanning' });
+    // An incremental scan ADDS to what is on screen, so the list stays up while
+    // it runs. Replacing it with a spinner would throw away the fill outcomes
+    // the user is looking at to fetch two new rows.
+    if (options.incremental !== true) setState({ kind: 'scanning' });
     setTarget(await activeTarget());
 
     const injected = await injectScanner();
@@ -507,7 +519,9 @@ export function App(): ReactNode {
         response: await sendToFrame<ContentScanResponse | ContentErrorResponse>(
           injected.tabId,
           frameId,
-          { type: 'CONTENT_SCAN' },
+          options.incremental === true
+            ? { type: 'CONTENT_SCAN', incremental: true }
+            : { type: 'CONTENT_SCAN' },
         ),
       })),
     );
@@ -569,13 +583,39 @@ export function App(): ReactNode {
 
     const semantic = mergeSemanticReports(semanticReports);
 
-    setState({
-      kind: 'scanned',
-      actions,
-      fieldsDetected,
-      outcomes: {},
-      frameByLocalId,
-      ...(semantic !== undefined ? { semantic } : {}),
+    /**
+     * An incremental scan adds; a full one replaces.
+     *
+     * Decided per frame from what each ANSWERED, so a page that could not give
+     * an incremental scan replaces its own rows rather than appearing twice.
+     * The outcomes of fills already performed are kept: they describe fields
+     * that are still on the page and were not rescanned.
+     */
+    const partial = scans.filter((scan) => scan.response?.ok === true && scan.response.incremental === true);
+    const merging = partial.length > 0 && partial.length === scans.filter((scan) => scan.response?.ok === true).length;
+
+    setState((current) => {
+      if (!merging || current.kind !== 'scanned') {
+        return {
+          kind: 'scanned',
+          actions,
+          fieldsDetected,
+          outcomes: {},
+          frameByLocalId,
+          ...(semantic !== undefined ? { semantic } : {}),
+        };
+      }
+
+      return {
+        ...current,
+        actions: [...current.actions, ...actions],
+        fieldsDetected: current.fieldsDetected + fieldsDetected,
+        frameByLocalId: { ...current.frameByLocalId, ...frameByLocalId },
+        // Kept. Every one of them describes a field that is still on the page
+        // and that this scan did not look at.
+        outcomes: current.outcomes,
+        ...(semantic !== undefined ? { semantic } : {}),
+      };
     });
 
     /**
@@ -933,8 +973,17 @@ export function App(): ReactNode {
           }}
         >
           <p className="mb-2 font-medium">This form changed. There may be new questions.</p>
-          <Button variant="secondary" className="w-full" onClick={() => void handleScan()} disabled={busy}>
-            Rescan
+          {/* Scans the part of the page that changed and ADDS what it finds, so
+              the fields already filled keep their outcomes instead of being
+              re-read from scratch. Still one click, by the user: nothing here
+              acts because the page changed. */}
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={() => void handleScan({ incremental: true })}
+            disabled={busy}
+          >
+            Check for new questions
           </Button>
         </div>
       )}

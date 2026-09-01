@@ -105,6 +105,28 @@ export default defineUnlistedScript(() => {
      */
     let changeAlreadyReported = false;
 
+    /**
+     * The subtrees that have gained element nodes since the last scan.
+     *
+     * Held so a reveal can be scanned WHERE IT HAPPENED instead of costing a
+     * full pass over the page (spec section 16). Cleared by every scan: after
+     * one, the panel's list is current and these subtrees are already in it.
+     */
+    const changedRoots = new Set<Element>();
+
+    /**
+     * Too many distinct subtrees changed to be worth tracking individually.
+     *
+     * A framework re-rendering a long list produces hundreds of mutation
+     * targets, and at that point scanning them separately is more work than
+     * scanning the page once. The flag says "an incremental pass would not be
+     * honest here", and the next scan is a full one.
+     */
+    let changedRootsOverflowed = false;
+
+    /** Roots beyond which an incremental pass stops being cheaper. */
+    const MAX_CHANGED_ROOTS = 16;
+
     const budget = getRuntimeBudget();
 
     /**
@@ -135,6 +157,8 @@ export default defineUnlistedScript(() => {
     interface ScanOutcome {
       actions: ResolvedFieldAction[];
       fieldsDetected: number;
+      /** True when only the changed subtrees were scanned. See the response. */
+      incremental?: boolean;
       error?: { code: string; message: string };
       /** Cross-origin iframes on this page - see `embeddedOrigins` below. */
       embeddedOrigins?: string[];
@@ -188,24 +212,81 @@ export default defineUnlistedScript(() => {
       return [...origins];
     }
 
-    /** Scan, ask the worker what to do, and report back. Never fills. */
-    async function scanAndResolve(root?: ParentNode): Promise<ScanOutcome> {
+    /**
+     * Can the next scan cover only what changed?
+     *
+     * Three conditions, all of them about honesty rather than speed: something
+     * must have changed, we must know WHERE (no overflow), and there must be a
+     * previous scan for the new fields to be added to. Fail any of them and the
+     * answer is a full scan, which is always correct and merely slower.
+     */
+    function canScanIncrementally(): boolean {
+      return changedRoots.size > 0 && !changedRootsOverflowed && elementsById.size > 0;
+    }
+
+    /**
+     * Scan, ask the worker what to do, and report back. Never fills.
+     *
+     * `incremental` scans only the subtrees that changed since the last scan
+     * and returns only the fields that are NEW - the panel keeps everything it
+     * already had, including the outcomes of fills it has already run. A
+     * conditional question therefore costs a scan of the block it appeared in
+     * rather than a pass over the whole form (spec section 16).
+     */
+    async function scanAndResolve(
+      options: { root?: ParentNode; incremental?: boolean } = {},
+    ): Promise<ScanOutcome> {
       const ats = detectATS(
         { url: location.href, hostname: location.hostname, title: document.title },
         document,
       );
 
-      const scanOptions = root === undefined ? { ats } : { ats, root };
+      const incremental = options.incremental === true && canScanIncrementally();
+      const roots = incremental ? [...changedRoots] : undefined;
+
+      const scanOptions =
+        roots !== undefined
+          ? { ats, roots }
+          : options.root === undefined
+            ? { ats }
+            : { ats, root: options.root };
       const { result: scan, elements } = await scanPage(document, scanOptions);
 
-      // Refresh the id map. Cleared first so elements removed by a re-render
-      // are released rather than pinned in memory by our own map - on a
-      // long-lived single-page application this is the difference between a
-      // bounded map and an unbounded leak.
-      elementsById.clear();
-      for (const [localId, element] of elements) elementsById.set(localId, element);
+      // Consumed by the scan whether or not it was incremental: after a full
+      // pass these subtrees are in the panel's list too.
+      changedRoots.clear();
+      changedRootsOverflowed = false;
 
-      lastDescriptors = scan.fields;
+      /**
+       * Drop anything we have already described.
+       *
+       * A changed subtree routinely contains controls that were there before -
+       * a block gains one field and the mutation target is the fieldset holding
+       * six. Describing those again would give one question two ids, so the
+       * panel would show it twice and the second row would have no fill outcome.
+       */
+      const known = new Set(elementsById.values());
+      const fresh = incremental
+        ? scan.fields.filter((field) => {
+            const element = elements.get(field.localId);
+            return element !== undefined && !known.has(element);
+          })
+        : scan.fields;
+
+      // Refresh the id map. On a full scan it is CLEARED first so elements
+      // removed by a re-render are released rather than pinned in memory by our
+      // own map - on a long-lived single-page application that is the
+      // difference between a bounded map and an unbounded leak. An incremental
+      // scan adds to it instead: the fields it did not look at are still on the
+      // page, still in the panel, and still fillable.
+      if (!incremental) elementsById.clear();
+      for (const field of fresh) {
+        const element = elements.get(field.localId);
+        if (element !== undefined) elementsById.set(field.localId, element);
+      }
+
+      scan.fields = fresh;
+      lastDescriptors = incremental ? [...lastDescriptors, ...fresh] : fresh;
       // The panel now has a current list, so the next reveal is worth
       // reporting again.
       changeAlreadyReported = false;
@@ -219,6 +300,7 @@ export default defineUnlistedScript(() => {
         return {
           actions: [],
           fieldsDetected: 0,
+          ...(incremental ? { incremental: true } : {}),
           ...(embedded.length > 0 ? { embeddedOrigins: embedded } : {}),
         };
       }
@@ -262,6 +344,7 @@ export default defineUnlistedScript(() => {
       return {
         actions: response.actions,
         fieldsDetected: scan.fields.length,
+        ...(incremental ? { incremental: true } : {}),
         ...(embedded.length > 0 ? { embeddedOrigins: embedded } : {}),
         ...(response.semantic !== undefined ? { semantic: response.semantic } : {}),
       };
@@ -498,9 +581,24 @@ export default defineUnlistedScript(() => {
       let timer: ReturnType<typeof setTimeout> | undefined;
 
       const observer = new MutationObserver((mutations) => {
-        const addedElements = mutations.some((mutation) =>
-          [...mutation.addedNodes].some((node) => node.nodeType === Node.ELEMENT_NODE),
-        );
+        let addedElements = false;
+
+        for (const mutation of mutations) {
+          if (![...mutation.addedNodes].some((node) => node.nodeType === Node.ELEMENT_NODE)) {
+            continue;
+          }
+          addedElements = true;
+
+          // The TARGET, not the added node: a control can arrive as the added
+          // node itself or as one of its descendants, and the container covers
+          // both. Anything that is not an element (a document fragment being
+          // populated) is recorded as an overflow rather than guessed at.
+          if (mutation.target instanceof Element) changedRoots.add(mutation.target);
+          else changedRootsOverflowed = true;
+
+          if (changedRoots.size > MAX_CHANGED_ROOTS) changedRootsOverflowed = true;
+        }
+
         if (!addedElements) return;
 
         if (timer !== undefined) clearTimeout(timer);
@@ -532,7 +630,7 @@ export default defineUnlistedScript(() => {
     function validateContentRequest(
       message: unknown,
     ):
-      | { type: 'CONTENT_SCAN' }
+      | { type: 'CONTENT_SCAN'; incremental?: boolean }
       | { type: 'CONTENT_FILL'; actions: ResolvedFieldAction[]; resume?: ResumePayload }
       | {
           type: 'CONTENT_CORRECT';
@@ -544,7 +642,13 @@ export default defineUnlistedScript(() => {
       if (typeof message !== 'object' || message === null) return null;
       const raw = message as Record<string, unknown>;
 
-      if (raw['type'] === 'CONTENT_SCAN') return { type: 'CONTENT_SCAN' };
+      if (raw['type'] === 'CONTENT_SCAN') {
+        // Anything other than an explicit `true` means a full scan. A page
+        // cannot talk us into a partial scan by sending a truthy string.
+        return raw['incremental'] === true
+          ? { type: 'CONTENT_SCAN', incremental: true }
+          : { type: 'CONTENT_SCAN' };
+      }
 
       if (raw['type'] === 'CONTENT_CORRECT') {
         const localId = raw['localId'];
@@ -662,7 +766,7 @@ export default defineUnlistedScript(() => {
       if (request === null) return false;
 
       if (request.type === 'CONTENT_SCAN') {
-        scanAndResolve()
+        scanAndResolve(request.incremental === true ? { incremental: true } : {})
           .then((outcome) => {
             // A worker-side failure is reported AS a failure, with its code
             // intact. Returning `{ ok: true, actions: [] }` here would tell the
@@ -681,6 +785,7 @@ export default defineUnlistedScript(() => {
               ok: true,
               actions: outcome.actions,
               fieldsDetected: outcome.fieldsDetected,
+              ...(outcome.incremental === true ? { incremental: true } : {}),
               ...(outcome.embeddedOrigins !== undefined
                 ? { embeddedOrigins: outcome.embeddedOrigins }
                 : {}),

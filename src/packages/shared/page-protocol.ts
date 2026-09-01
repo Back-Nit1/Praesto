@@ -42,6 +42,15 @@ export interface ResumePayload {
 
 export interface ContentScanRequest {
   type: 'CONTENT_SCAN';
+  /**
+   * Scan only what changed since the last scan, and report only new fields.
+   *
+   * Sent when the user acts on the "this form changed" notice, so a revealed
+   * conditional question costs a scan of the block it appeared in rather than a
+   * pass over the whole form. The page decides whether it can honour it: if it
+   * has lost track of what changed, it answers with a full scan and says so.
+   */
+  incremental?: boolean;
 }
 
 export interface ContentFillRequest {
@@ -82,6 +91,16 @@ export interface ContentErrorResponse {
 export interface ContentScanResponse {
   ok: true;
   actions: ResolvedFieldAction[];
+  /**
+   * These actions are an ADDITION to the panel's list, not a replacement.
+   *
+   * Present only when the page actually performed an incremental scan. Absent
+   * means the list is complete and replaces what the panel had - including when
+   * the panel asked for an incremental scan and the page could not give one,
+   * which is why this is reported by the ANSWER rather than assumed from the
+   * request.
+   */
+  incremental?: boolean;
   /**
    * Origins of the cross-origin iframes on this page.
    *

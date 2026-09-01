@@ -431,6 +431,47 @@ describe('fixture: dynamic-dependent-question.html', () => {
     expect(result.fields.map((field) => field.name)).toContain('requires_sponsorship');
   });
 
+  it('scans only the subtree that changed, and finds the revealed question there', async () => {
+    // The incremental path (spec section 16): a conditional question costs a
+    // scan of the block it appeared in, not a pass over the whole form.
+    const doc = loadFixture('dynamic-dependent-question.html');
+    const revealed = doc.getElementById('visa-details');
+    revealed?.removeAttribute('hidden');
+
+    const { result } = await scanPage(doc, { ats: 'unknown', roots: [revealed as HTMLElement] });
+
+    expect(result.fields.map((field) => field.name)).toEqual(['visa_type']);
+  });
+
+  it('describes a control that IS the changed root, not only its descendants', async () => {
+    // A page that appends a bare input produces a mutation whose added node is
+    // the field itself. `querySelectorAll` searches descendants only, so
+    // without this the commonest single-field reveal would be invisible.
+    const doc = loadFixture('dynamic-dependent-question.html');
+    const input = doc.getElementById('visa-type');
+    doc.getElementById('visa-details')?.removeAttribute('hidden');
+
+    const { result } = await scanPage(doc, { ats: 'unknown', roots: [input as HTMLElement] });
+
+    expect(result.fields.map((field) => field.name)).toEqual(['visa_type']);
+  });
+
+  it('describes a field found under two overlapping roots exactly once', async () => {
+    // Two mutations inside the same container yield two roots, one containing
+    // the other. A field described twice becomes two panel rows for one
+    // question, and only one of them can carry a fill outcome.
+    const doc = loadFixture('dynamic-dependent-question.html');
+    const container = doc.getElementById('visa-details');
+    container?.removeAttribute('hidden');
+
+    const { result } = await scanPage(doc, {
+      ats: 'unknown',
+      roots: [container as HTMLElement, doc.getElementById('visa-type') as HTMLElement],
+    });
+
+    expect(result.fields).toHaveLength(1);
+  });
+
   it('describes it once the answer reveals it', async () => {
     const doc = loadFixture('dynamic-dependent-question.html');
     doc.getElementById('visa-details')?.removeAttribute('hidden');
