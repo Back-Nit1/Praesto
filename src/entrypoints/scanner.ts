@@ -40,6 +40,7 @@ import type {
 } from '@shared/page-protocol';
 import { detectATS } from '@ats/detector';
 import { scanPage } from '@form-engine/detector/scanner';
+import { ChangedSubtrees, forgetDetachedFields } from '@form-engine/detector/change-tracker';
 import { computeFingerprints } from '@form-engine/fingerprints/fingerprint';
 import { executeFills } from '@fill-engine/executor';
 import { clearPendingResume, setPendingResume } from '@fill-engine/adapters/file-upload';
@@ -106,26 +107,14 @@ export default defineUnlistedScript(() => {
     let changeAlreadyReported = false;
 
     /**
-     * The subtrees that have gained element nodes since the last scan.
+     * Where the page has changed since the last scan.
      *
-     * Held so a reveal can be scanned WHERE IT HAPPENED instead of costing a
-     * full pass over the page (spec section 16). Cleared by every scan: after
-     * one, the panel's list is current and these subtrees are already in it.
+     * The rules live in `@form-engine/detector/change-tracker` so they can be
+     * tested without a browser - this file has no test harness, and "does it
+     * stop holding DOM nodes when a page re-renders forever" is not a question
+     * a manual test answers.
      */
-    const changedRoots = new Set<Element>();
-
-    /**
-     * Too many distinct subtrees changed to be worth tracking individually.
-     *
-     * A framework re-rendering a long list produces hundreds of mutation
-     * targets, and at that point scanning them separately is more work than
-     * scanning the page once. The flag says "an incremental pass would not be
-     * honest here", and the next scan is a full one.
-     */
-    let changedRootsOverflowed = false;
-
-    /** Roots beyond which an incremental pass stops being cheaper. */
-    const MAX_CHANGED_ROOTS = 16;
+    const changedSubtrees = new ChangedSubtrees();
 
     const budget = getRuntimeBudget();
 
@@ -221,7 +210,16 @@ export default defineUnlistedScript(() => {
      * answer is a full scan, which is always correct and merely slower.
      */
     function canScanIncrementally(): boolean {
-      return changedRoots.size > 0 && !changedRootsOverflowed && elementsById.size > 0;
+      if (!changedSubtrees.trackable) return false;
+      if (elementsById.size === 0) return false;
+
+      // The per-scan field cap is a cap on what we will HOLD, not merely on
+      // what one pass may describe. Without this a page that reveals ten
+      // questions a hundred times would grow the map, the panel's list and the
+      // worker's stash past the budget one incremental scan at a time - each
+      // pass individually under the limit. At the ceiling the next scan is a
+      // full one, which truncates honestly and says so.
+      return elementsById.size < budget.maxFieldsPerScan;
     }
 
     /**
@@ -242,7 +240,7 @@ export default defineUnlistedScript(() => {
       );
 
       const incremental = options.incremental === true && canScanIncrementally();
-      const roots = incremental ? [...changedRoots] : undefined;
+      const roots = incremental ? changedSubtrees.take() : undefined;
 
       const scanOptions =
         roots !== undefined
@@ -253,9 +251,9 @@ export default defineUnlistedScript(() => {
       const { result: scan, elements } = await scanPage(document, scanOptions);
 
       // Consumed by the scan whether or not it was incremental: after a full
-      // pass these subtrees are in the panel's list too.
-      changedRoots.clear();
-      changedRootsOverflowed = false;
+      // pass these subtrees are in the panel's list too. (`take()` above has
+      // already reset it on the incremental path; this covers the other one.)
+      changedSubtrees.reset();
 
       /**
        * Drop anything we have already described.
@@ -287,6 +285,16 @@ export default defineUnlistedScript(() => {
 
       scan.fields = fresh;
       lastDescriptors = incremental ? [...lastDescriptors, ...fresh] : fresh;
+
+      // Drop what the page has thrown away. An incremental scan does not clear
+      // the map, so on a long-lived single-page application the entries for
+      // removed controls would otherwise accumulate for as long as the tab is
+      // open - and each one pins a detached DOM subtree in memory.
+      //
+      // The PANEL still shows those rows until a full rescan: it was told about
+      // them and nothing has told it otherwise. That is recorded in gaps.md §11
+      // and is a display staleness, not a leak.
+      if (incremental) lastDescriptors = forgetDetachedFields(elementsById, lastDescriptors);
       // The panel now has a current list, so the next reveal is worth
       // reporting again.
       changeAlreadyReported = false;
@@ -581,25 +589,9 @@ export default defineUnlistedScript(() => {
       let timer: ReturnType<typeof setTimeout> | undefined;
 
       const observer = new MutationObserver((mutations) => {
-        let addedElements = false;
-
-        for (const mutation of mutations) {
-          if (![...mutation.addedNodes].some((node) => node.nodeType === Node.ELEMENT_NODE)) {
-            continue;
-          }
-          addedElements = true;
-
-          // The TARGET, not the added node: a control can arrive as the added
-          // node itself or as one of its descendants, and the container covers
-          // both. Anything that is not an element (a document fragment being
-          // populated) is recorded as an overflow rather than guessed at.
-          if (mutation.target instanceof Element) changedRoots.add(mutation.target);
-          else changedRootsOverflowed = true;
-
-          if (changedRoots.size > MAX_CHANGED_ROOTS) changedRootsOverflowed = true;
-        }
-
-        if (!addedElements) return;
+        // The tracker both filters (did anything ELEMENT-shaped appear?) and
+        // remembers where, so the two cannot disagree about what counts.
+        if (!changedSubtrees.note(mutations)) return;
 
         if (timer !== undefined) clearTimeout(timer);
         timer = setTimeout(onChange, budget.mutationDebounceMs);
