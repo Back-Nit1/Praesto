@@ -97,6 +97,14 @@ export function pendingKey(tabId: number | undefined, canonicalPageUrl: string):
 
 type PendingMap = Record<string, PendingRun>;
 
+/**
+ * The scan metadata a history row needs, held until the fill report arrives.
+ *
+ * Only the worker knows the detected label, the confidence and the cascade
+ * stage, and only for the few milliseconds inside `resolveFields` - by the time
+ * the page reports what landed, MV3 has often evicted and restarted the worker.
+ * So it is stashed here, keyed by tab and canonical URL, and joined later.
+ */
 export class PendingRunStore {
   /**
    * @param store `chrome.storage.session` in production. Injected so this is

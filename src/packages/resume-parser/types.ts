@@ -62,6 +62,13 @@ export type ResumeSectionType =
   | 'certifications'
   | 'unknown';
 
+/**
+ * A run of lines under one heading.
+ *
+ * Sections are what make the rest of the parser possible: "Rutgers University"
+ * means a school under Education and an employer under Experience, and no
+ * amount of looking at the line itself settles that.
+ */
 export interface ResumeSection {
   type: ResumeSectionType;
   /** The heading text as written, when there was one. */
@@ -109,6 +116,13 @@ export interface SemanticResumeParser {
   parse(input: StructuredResume): Promise<SemanticResumeResult>;
 }
 
+/**
+ * What a model-backed parser may return: CANDIDATES, never profile values.
+ *
+ * Everything here still passes through the import review screen, where the user
+ * confirms each value before it is kept - the same rule the form side lives
+ * under, for the same reason.
+ */
 export interface SemanticResumeResult {
   /** Candidate values keyed by canonical profile path. */
   candidates: Record<string, unknown>;

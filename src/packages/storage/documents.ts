@@ -112,6 +112,14 @@ function looksLikePdf(bytes: ArrayBuffer): boolean {
   return PDF_MAGIC.every((byte, index) => head[index] === byte);
 }
 
+/**
+ * The applicant's resume, in IndexedDB.
+ *
+ * A separate store from the profile for two reasons: it is binary and it is
+ * megabytes, and `chrome.storage.local`'s ~10 MB quota is shared with
+ * everything else the extension keeps. Nothing here leaves the machine except
+ * as a file the user has asked to attach to an application.
+ */
 export class ResumeDocumentStore {
   private readonly collection = new IndexedDbCollection<ResumeDocument>(STORES.resumes);
 

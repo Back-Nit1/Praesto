@@ -1,3 +1,16 @@
+/**
+ * The toolbar-click handoff.
+ *
+ * A click on the extension icon is two things at once: the browser gesture that
+ * grants `activeTab`, and the user asking for a scan. The second has to survive
+ * the moment between the worker seeing the click and the side panel finishing
+ * opening - so it is written down, with a TTL.
+ *
+ * What these assertions protect is that it is consumed EXACTLY once. Handed out
+ * twice, a panel that reopens would scan a page nobody asked it to; handed out
+ * never, the click does nothing and the user clicks Scan by hand, which is the
+ * loop this handoff removed.
+ */
 import { describe, expect, it } from 'vitest';
 import { InMemoryStore } from '@storage/key-value-store';
 import {

@@ -98,6 +98,7 @@ export interface CollectionEntryIndexes {
 
 const FIRST_ENTRIES: CollectionEntryIndexes = { education: 0, employment: 0, projects: 0 };
 
+/** What the caller knows that the mapper cannot work out for itself. */
 export interface MapFieldOptions {
   /** Learned corrections. Defaults to knowing nothing. */
   learned?: LearnedMappingLookup;

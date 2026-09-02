@@ -344,6 +344,13 @@ export function extractEmployment(
   });
 }
 
+/**
+ * Projects, from the lines under a Projects heading.
+ *
+ * The loosest of the three extractors, because the section itself is: entries
+ * have no agreed shape, so this takes the first line as the name and leaves the
+ * rest as description rather than inventing structure the document never had.
+ */
 export function extractProjects(lines: readonly ResumeLine[], documentId: string): Project[] {
   return splitEntries(lines).map((entry) => {
     const texts = entry.headerLines.map((line) => withoutDates(line.text, entry.dates));

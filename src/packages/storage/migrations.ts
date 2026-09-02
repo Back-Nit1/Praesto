@@ -46,6 +46,13 @@ export interface MigrationStep {
   run(context: MigrationContext): Promise<Result<void, AppError>>;
 }
 
+/**
+ * The narrow storage surface a migration step may touch.
+ *
+ * Four methods, handed in rather than the store itself, so a step cannot reach
+ * past what the runner can log, dry-run or roll forward - and so a step written
+ * three versions ago still compiles against a store that has changed since.
+ */
 export interface MigrationContext {
   read<T>(key: string): Promise<T | undefined>;
   write(key: string, value: unknown): Promise<void>;

@@ -170,6 +170,7 @@ export interface QuotaStore {
   set<T>(key: string, value: T): Promise<{ ok: boolean }>;
 }
 
+/** One fixed window: where it is stored, how big it is, and how long it lasts. */
 export interface PersistentQuotaOptions {
   /** Storage key holding this quota's window. */
   storageKey: string;

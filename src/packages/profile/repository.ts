@@ -36,6 +36,13 @@ import { getValueAtPath } from './selectors';
 
 const log = createLogger('profile:repository');
 
+/**
+ * Everything the rest of the codebase may do to the profile.
+ *
+ * Deliberately small, and deliberately an interface: the options page, the side
+ * panel and the worker all reach the profile through this, so "what can change
+ * the applicant's data" is answerable by reading one declaration.
+ */
 export interface ProfileRepository {
   /** The active profile, or undefined when the user has not created one yet. */
   load(): Promise<Result<ApplicantProfile | undefined, AppError>>;

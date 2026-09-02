@@ -29,6 +29,7 @@ import {
 } from './schemas';
 import { CHAT_LIMITS } from './schemas';
 
+/** What a caller may attach to a question, and what happens to each part. */
 export interface AskOptions {
   /**
    * Text the user did not write: page labels, a job description, resume lines.

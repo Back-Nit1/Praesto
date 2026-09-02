@@ -486,6 +486,14 @@ const COLLECTION_CONTEXT_PATTERNS: ReadonlyArray<readonly [ProfileCollection, Re
   ['projects', /\b(project|projects|portfolio piece|side project)\b/],
 ];
 
+/**
+ * Which repeated section a heading is talking about, if exactly one.
+ *
+ * "School" under an Education legend means the degree; the same word under
+ * Work Experience means something else entirely. Ambiguity returns null rather
+ * than a best guess - the caller then leaves the field for the user, which is
+ * the whole reason section context is consulted at all.
+ */
 export function collectionFromContext(text: string | undefined): ProfileCollection | null {
   if (text === undefined || text.length === 0) return null;
 

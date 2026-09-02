@@ -55,6 +55,7 @@ import type { SemanticPort } from './port';
 
 const log = createLogger('semantic:apply');
 
+/** Everything the whole fallback needs: the pipeline's verdicts, and a way to ask. */
 export interface SemanticApplyInput {
   readonly profile: ApplicantProfile;
   /** What the deterministic pipeline concluded about every scanned field. */

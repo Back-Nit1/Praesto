@@ -150,6 +150,7 @@ function minimizeUrl(href: string): string {
   }
 }
 
+/** What to scan, and how much of it. */
 export interface ScanOptions {
   ats: ATSKind;
   /** Root to scan. Defaults to the whole document; a MutationObserver rescan

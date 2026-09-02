@@ -116,11 +116,19 @@ export interface CachedConcept {
   readonly createdAt: string;
 }
 
+/** Size ceiling and clock, both injectable so eviction and ageing are testable. */
 export interface CacheOptions {
   readonly maxEntries?: number;
   readonly now?: () => Date;
 }
 
+/**
+ * Questions this install has already paid a model to understand.
+ *
+ * Read before every stage-1 call and written after every answer, including the
+ * answer "no path fits this" - see the header for why a negative is as
+ * valuable as a positive, and why an entry is bound to the payload it answered.
+ */
 export class SemanticConceptCache {
   private readonly maxEntries: number;
   private readonly now: () => Date;

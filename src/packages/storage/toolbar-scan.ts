@@ -19,6 +19,13 @@ import { STORAGE_KEYS } from './keys';
 export const TOOLBAR_SCAN_SIGNAL = 'TOOLBAR_SCAN_REQUESTED';
 export const TOOLBAR_SCAN_TTL_MS = 30_000;
 
+/**
+ * The broadcast that tells an ALREADY-OPEN panel a toolbar click happened.
+ *
+ * The stored request below covers the panel that is still opening; this covers
+ * the one that is already there and would otherwise sit and wait for a remount
+ * that never comes.
+ */
 export interface ToolbarScanSignal {
   type: typeof TOOLBAR_SCAN_SIGNAL;
   tabId: number;
@@ -29,12 +36,27 @@ interface ToolbarScanRequest {
   requestedAt: number;
 }
 
+/**
+ * Narrow a runtime broadcast to this signal.
+ *
+ * Checked rather than cast: every extension context receives every broadcast,
+ * so this listener sees messages meant for other listeners, and a duck-typed
+ * cast here would turn one of them into a scan of whatever tab is in front of
+ * the user.
+ */
 export function isToolbarScanSignal(value: unknown): value is ToolbarScanSignal {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<ToolbarScanSignal>;
   return candidate.type === TOOLBAR_SCAN_SIGNAL && Number.isInteger(candidate.tabId);
 }
 
+/**
+ * The click, written down until the panel is ready to read it.
+ *
+ * Session area with a short TTL: a click is a statement about NOW, and one
+ * that survived a browser restart would scan a page the user has forgotten
+ * asking about.
+ */
 export class ToolbarScanStore {
   constructor(
     private readonly store: KeyValueStore = sessionStore(),

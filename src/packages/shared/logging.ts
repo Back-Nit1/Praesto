@@ -44,10 +44,17 @@ export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
 }
 
+/** The level in force right now. Read by the UI, and by tests asserting it. */
 export function getLogLevel(): LogLevel {
   return currentLevel;
 }
 
+/**
+ * Would a message at this level be emitted?
+ *
+ * Exported so a caller can skip BUILDING a message it would only throw away -
+ * the same saving `debugLazy` makes, for code that cannot use a thunk.
+ */
 export function isLevelEnabled(level: Exclude<LogLevel, 'silent'>): boolean {
   return LEVEL_RANK[currentLevel] >= LEVEL_RANK[level];
 }
@@ -63,6 +70,14 @@ export function redact(value: unknown): string {
   return `<redacted:${typeof value}:${text?.length ?? 0}>`;
 }
 
+/**
+ * What every module logs through.
+ *
+ * An interface rather than the bare console so that the level filter, the
+ * module prefix and the PII placeholder are applied in one place - a stray
+ * `console.log` of a descriptor is how an applicant's answer ends up in a
+ * devtools transcript.
+ */
 export interface Logger {
   error(message: string, ...args: unknown[]): void;
   warn(message: string, ...args: unknown[]): void;

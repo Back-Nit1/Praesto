@@ -22,6 +22,7 @@ import { ok, type Result } from '@shared/result';
 import { ChromeLocalStore, type KeyValueStore } from './key-value-store';
 import { STORAGE_KEYS } from './keys';
 
+/** Every user-configurable setting. One so far; the shape is the point. */
 export interface Settings {
   /**
    * Show development surfaces: the metrics screen, and mapping detail.
@@ -36,6 +37,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = { developerMode: false };
 
+/** Read and write settings, defensively in both directions. See the header. */
 export class SettingsRepository {
   constructor(private readonly store: KeyValueStore = new ChromeLocalStore()) {}
 

@@ -26,6 +26,13 @@ import type { ResumeTextItem } from '../types';
 
 const log = createLogger('resume:pdf');
 
+/**
+ * Positioned text from a PDF, and how many pages it was actually read from.
+ *
+ * The count is reported rather than assumed because a document may DECLARE any
+ * number of pages and we read at most `MAX_PAGES` of them - a resume that was
+ * truncated must be able to say so.
+ */
 export interface ExtractionResult {
   items: ResumeTextItem[];
   pageCount: number;

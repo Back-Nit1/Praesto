@@ -36,6 +36,7 @@ export interface FieldFillOutcome {
   failureReason?: FillFailureReason;
 }
 
+/** What the executor needs from the context it is running in. */
 export interface ExecuteFillOptions {
   /** Resolve a localId to its live element. Supplied by the content script. */
   resolveElement: (localId: string) => HTMLElement | null;

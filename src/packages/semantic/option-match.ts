@@ -178,6 +178,7 @@ export interface OptionStageInput {
   readonly port: SemanticPort;
 }
 
+/** What stage 2 settled on, how, and what it cost. */
 export interface OptionStageOutcome {
   /** An option from the input list, by reference, or null for "leave it". */
   readonly option: FieldOption | null;

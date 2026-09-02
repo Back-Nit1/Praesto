@@ -76,6 +76,7 @@ export interface ResponseParser<T> {
   safeParse: (value: unknown) => { success: true; data: T } | { success: false };
 }
 
+/** Construction knobs. Every one exists so a test can drive this class. */
 export interface GatewayOptions {
   timeoutMs?: number;
   /** Injectable for tests. Defaults to the global. */
@@ -88,6 +89,15 @@ export interface RateLimitedFailure {
   retryAfterMs: number;
 }
 
+/**
+ * The one object in this extension that can reach the network.
+ *
+ * Everything a request has to survive lives here and nowhere else: the single
+ * compiled-in origin, the device token, the burst bucket, the daily budget, the
+ * timeout, and the refusal to follow a redirect. A caller supplies a path, a
+ * body and a parser; it cannot supply a host, and it cannot opt out of the
+ * budget.
+ */
 export class BackendGateway {
   private readonly burst: TokenBucket;
   private readonly daily: PersistentQuota;

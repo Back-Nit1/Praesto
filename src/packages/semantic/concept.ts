@@ -55,6 +55,7 @@ import type { ConceptResolution, RefusedField } from './types';
 
 const log = createLogger('semantic:concept');
 
+/** What stage 1 needs: the refusals, a way to ask, and a place to remember. */
 export interface ConceptStageInput {
   /** Fields from the queue. Only `no_mapping` entries are considered. */
   readonly fields: readonly RefusedField[];
@@ -63,6 +64,7 @@ export interface ConceptStageInput {
   readonly config?: ConfidencePolicyConfig;
 }
 
+/** What stage 1 concluded, what it cost, and how it failed if it did. */
 export interface ConceptStageOutcome {
   /** Accepted concepts. Every one names a real `ProfilePath`. */
   readonly resolutions: readonly ConceptResolution[];

@@ -50,6 +50,7 @@ export interface ObservedRatio {
   denominator: number;
 }
 
+/** The four §26 metrics this table can support, plus what they were computed over. */
 export interface DevelopmentMetrics {
   /** Runs the metrics were computed over. */
   runs: number;

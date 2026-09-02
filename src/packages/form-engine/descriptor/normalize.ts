@@ -304,6 +304,15 @@ const NEGATION_TOKENS: ReadonlySet<string> = new Set([
   'nor',
 ]);
 
+/**
+ * Does this question ask the OPPOSITE of the one we think it asks?
+ *
+ * "Are you authorized to work?" and "Do you NOT require sponsorship?" match the
+ * same aliases and want opposite answers, so a mapper that ignores negation
+ * fills a legal question with the exact wrong value. Callers use this to refuse
+ * rather than to invert: flipping a boolean we were not certain about would be
+ * a second guess stacked on a first.
+ */
 export function containsNegation(normalized: string): boolean {
   for (const token of tokenize(normalized)) {
     if (NEGATION_TOKENS.has(token)) return true;

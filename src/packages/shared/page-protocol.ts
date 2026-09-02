@@ -67,6 +67,14 @@ export interface ContentFillRequest {
   resume?: ResumePayload;
 }
 
+/**
+ * "This field means something else."
+ *
+ * Addressed by `localId` because the panel knows which ROW the user clicked,
+ * not which element it came from - the page keeps that mapping. `profilePath`
+ * is null for "this field means nothing", which is a correction in its own
+ * right and not an absence of one.
+ */
 export interface ContentCorrectRequest {
   type: 'CONTENT_CORRECT';
   localId: string;
@@ -88,6 +96,7 @@ export interface ContentErrorResponse {
   message: string;
 }
 
+/** A successful scan: what to do about each field, and what the page could not show us. */
 export interface ContentScanResponse {
   ok: true;
   actions: ResolvedFieldAction[];
@@ -152,11 +161,25 @@ export interface FieldFillReport {
   failureReason?: FillFailureReason;
 }
 
+/**
+ * What actually happened, field by field.
+ *
+ * One outcome per action attempted, including the failures: the panel is not
+ * permitted to invent an outcome it was not told, and a fill that reported
+ * only successes is how "13 filled" came to be printed over two empty boxes.
+ */
 export interface ContentFillResponse {
   ok: true;
   outcomes: FieldFillReport[];
 }
 
+/**
+ * Acknowledgement only.
+ *
+ * The correction is stored by the WORKER; the page's part is finding the field
+ * and forwarding it. There is nothing further for the panel to render, so
+ * there is nothing further in the reply.
+ */
 export interface ContentCorrectResponse {
   ok: boolean;
 }

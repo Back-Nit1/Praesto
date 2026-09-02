@@ -78,6 +78,14 @@ const ALLOWED_PATHS: readonly string[] = [
   'projects[0].url',
 ];
 
+/**
+ * The `SemanticPort` the fallback asks for, spoken over the gateway.
+ *
+ * A factory rather than a class because it holds no state of its own: the
+ * budget, the token and the origin all live in the gateway, and this is the
+ * translation between two vocabularies plus the three call-site rules in the
+ * header (truncate, never send an empty batch, sanitise what comes back).
+ */
 export function createSemanticPort(gateway: BackendGateway): SemanticPort {
   return {
     async identifyConcepts(
