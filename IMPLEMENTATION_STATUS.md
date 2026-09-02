@@ -3,7 +3,7 @@
 Required by `prompt.md` section 0.13. Updated as work lands.
 
 **Last updated:** 2026-09-01
-**Tests:** 732 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
+**Tests:** 763 passing · **Typecheck:** clean · **Build:** clean (`dist/chrome-mv3`)
 
 ---
 
@@ -467,7 +467,12 @@ what it knows.
    a count. Answering that would mean joining it to history, which is a
    disclosure decision rather than a missing feature.
 
-21. **No metric has ever been computed over real data.** The audit trail now
+21. **A hostile page can make the concept cache forget.** Forty novel questions
+   per scan against a five-hundred-entry cache evicted oldest-first. Every
+   re-ask goes through the same validation, so the cost is spend - bounded by
+   the daily quota - rather than a wrong answer. Written up in `gaps.md` §12.
+
+22. **No metric has ever been computed over real data.** The audit trail now
    carries the outcomes they need, but no application has been filled outside
    our own fixtures, so the numbers on that screen have only ever been produced
    by tests. This is the same gap as limitation 11, and the same capture closes
@@ -602,7 +607,7 @@ name a field; it cannot address a DOM node.
 
 ```
 npm run compile    # tsc --noEmit, strict
-npm test           # 732 tests
+npm test           # 763 tests
 npm run build      # -> dist/chrome-mv3, loads unpacked in Chrome
 npm run fixtures   # practice forms at http://localhost:5174
 ```

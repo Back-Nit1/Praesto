@@ -288,6 +288,53 @@ measured against a real form.
 
 ---
 
+## 12. Findings from the security re-review
+
+Added 2026-09-01, from a pass over the trust boundaries rather than the roadmap.
+Three were fixed in that pass; the rest are recorded because they are bounded,
+not because they are harmless.
+
+**Fixed: one site could answer another site's questions.** The concept cache is
+global by design and keyed by a fingerprint that hashes twelve sorted options,
+while the request sends sixty unsorted - so a page could share a cache key with a
+real question and control what the model was told about it. Entries are now bound
+to a digest of the payload they answered. Security.md rule 5 has the detail. The
+general shape is worth carrying: *anything keyed by page-controlled text must be
+keyed by the same bytes it acts on.*
+
+**Fixed: the incremental rescan could hold a page's discarded DOM forever.**
+Three routes, all only reachable on a page that never stops re-rendering, and
+none visible in a manual test. Now bounded, and the rules moved to a module with
+tests (`@form-engine/detector/change-tracker`).
+
+**Fixed: the semantic pass dropped `required`.** It replaces an action object
+rather than editing it, so the form facts stamped during resolution were lost on
+exactly the fields the fallback helped with - which is to say, the required
+questions most likely to be missed. Facts are now stamped after every decision.
+
+**Open: a page can push real answers out of the concept cache.** Forty novel
+questions a scan, five hundred entries, oldest first. The cost is re-asking, and
+every re-ask goes through the same fences, so this is a spend problem bounded by
+the daily quota rather than a correctness one.
+
+**Open: `backend/chat.ts` is a network client nothing calls.** Built for phase
+11's free-response work. It should be re-reviewed when it is wired rather than
+treated as reviewed because it compiles.
+
+**Open: a model may answer under another field's id within one batch.** Ids are
+looked up in the map we built, so an invented id is discarded - but the model can
+answer field A's question under field B's id, and both are on the page in front
+of the user. The result is still a suggestion, still capped below autofill, and
+still read before it is written.
+
+**Not a gap, checked:** no HTML sink anywhere in the UI; PDF.js runs with
+`isEvalSupported: false` under a `script-src 'self'` CSP and a page cap; the
+message listener drops anything whose sender is not this extension before parsing
+it; the per-tab message bucket and the pending-scan stash are both bounded; the
+resume is cleared from page context in a `finally`.
+
+---
+
 ## What is NOT a gap
 
 Recorded so these are not re-litigated:
